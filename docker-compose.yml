@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: archivo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: archivo_sanjose
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "1234"
+    ports:
+      # Host 5433 -> contenedor 5432: así no choca con un Postgres nativo que
+      # ya esté usando el 5432 para otros proyectos. La app debe apuntar a
+      # DB_PORT=5433 cuando use este Postgres (ver README).
+      - "5433:5432"
+    volumes:
+      - archivo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d archivo_sanjose"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+# Los datos persisten en un volumen con nombre (no en el filesystem del
+# contenedor): "docker compose down" no borra la base; "docker compose down -v"
+# sí, si en algún momento se quiere arrancar de cero.
+volumes:
+  archivo_postgres_data:
