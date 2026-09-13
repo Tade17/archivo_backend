@@ -168,6 +168,8 @@ Filtros: `GET /api/auditoria?entidadAfectada=Expediente&entidadId=<uuid>` para v
 
 Base URL: `http://localhost:8080` (o el host que corresponda). Todos los paths llevan el prefijo `/api`.
 
+> Esta sección explica el *contrato* de cada endpoint (para entenderlo). Para *probarlo* interactivamente sin escribir curl/Postman, con la app corriendo abrí `http://localhost:8080/swagger-ui/index.html` — la lista de endpoints ahí se genera sola desde el código, así que siempre está al día.
+
 ### 8.1 Auth — `/api/auth`
 
 | Método | Path | Acceso | Body | Respuesta |
@@ -359,6 +361,5 @@ Todos devuelven `409` si el nombre/código ya existe (duplicado) o si al borrar 
 
 **Pendiente (no bloqueante para integrar el frontend):**
 - CI en GitHub Actions (correr los tests automáticamente en cada push).
-- Documentación interactiva tipo Swagger/OpenAPI.
 - Refresh tokens / logout con revocación server-side (hoy el token simplemente expira a las 8 horas).
 - Validación de MIME por contenido real del archivo (hoy se confía en el `Content-Type` que declara el cliente al subir, no se inspecciona el binario).

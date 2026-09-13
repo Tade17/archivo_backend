@@ -106,6 +106,10 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
+                        // La documentación en sí es pública (solo describe la API); los
+                        // endpoints reales que Swagger UI invoque siguen exigiendo el
+                        // JWT como cualquier otro request, vía el botón "Authorize".
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

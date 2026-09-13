@@ -137,6 +137,16 @@ archivos=<archivo2.pdf>
 
 El servidor calcula el hash SHA-256 y valida tipo MIME/tamaño antes de guardar — no se puede mandar la ruta o el hash a mano. `GET /api/documentos-digitales/{id}/archivo` descarga el binario real (y queda registrado en auditoría).
 
+## Documentación interactiva (Swagger)
+
+Con la app corriendo, abrí:
+
+```
+http://localhost:8080/swagger-ui/index.html
+```
+
+Ahí se ve la lista completa de endpoints (generada automáticamente desde el código, no a mano) y se pueden probar directo desde el navegador. Para probar un endpoint protegido: primero `POST /api/auth/login`, copiá el `token` de la respuesta, apretá el botón **Authorize** (arriba a la derecha) y pegalo ahí (sin el prefijo `Bearer`) — Swagger lo va a mandar solo en cada request siguiente.
+
 ## Tests
 
 ```bash
