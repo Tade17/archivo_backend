@@ -5,10 +5,13 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -18,6 +21,7 @@ import java.io.IOException;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
     private static final String PREFIJO = "Bearer ";
 
     private final JwtService jwtService;
@@ -50,9 +54,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                 }
             }
-        } catch (JwtException | IllegalArgumentException ex) {
-            // Token inválido/expirado/mal formado: se ignora y la request sigue sin
-            // autenticar, dejando que el filtro de autorización responda 401/403.
+        } catch (JwtException | IllegalArgumentException | UsernameNotFoundException ex) {
+            // Token inválido/expirado/mal formado, o el correo del token ya no existe
+            // como usuario: se ignora y la request sigue sin autenticar, dejando que
+            // el filtro de autorización responda 401/403. Se loguea para poder
+            // diagnosticar (antes esto fallaba en silencio, sin ningún rastro).
+            log.debug("Token JWT rechazado en {} {}: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
             SecurityContextHolder.clearContext();
         }
 

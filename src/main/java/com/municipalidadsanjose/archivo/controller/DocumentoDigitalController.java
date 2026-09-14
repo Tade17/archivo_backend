@@ -8,6 +8,7 @@ import com.municipalidadsanjose.archivo.service.DocumentoDigitalService;
 import com.municipalidadsanjose.archivo.storage.ArchivoAlmacenado;
 import com.municipalidadsanjose.archivo.storage.FileStorageService;
 import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -85,7 +86,7 @@ public class DocumentoDigitalController {
     @GetMapping
     public ResponseEntity<PaginaResponseDTO<DocumentoDigitalResponseDTO>> listarTodos(
             @RequestParam(required = false) UUID expedienteId,
-            @PageableDefault(size = 20, sort = "fechaDigitalizacion") Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "fechaDigitalizacion") Pageable pageable) {
         if (expedienteId != null) {
             return ResponseEntity.ok(PaginaResponseDTO.de(documentoDigitalService.listarPorExpediente(expedienteId, pageable)));
         }

@@ -5,6 +5,7 @@ import com.municipalidadsanjose.archivo.dto.expediente.ExpedienteRequestDTO;
 import com.municipalidadsanjose.archivo.dto.expediente.ExpedienteResponseDTO;
 import com.municipalidadsanjose.archivo.service.ExpedienteService;
 import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -47,7 +48,7 @@ public class ExpedienteController {
 
     @GetMapping
     public ResponseEntity<PaginaResponseDTO<ExpedienteResponseDTO>> listarTodos(
-            @PageableDefault(size = 20, sort = "fechaRegistro") Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "fechaRegistro") Pageable pageable) {
         return ResponseEntity.ok(PaginaResponseDTO.de(expedienteService.listarTodos(pageable)));
     }
 }

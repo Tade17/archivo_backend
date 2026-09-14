@@ -5,6 +5,7 @@ import com.municipalidadsanjose.archivo.dto.prestamo.PrestamoRequestDTO;
 import com.municipalidadsanjose.archivo.dto.prestamo.PrestamoResponseDTO;
 import com.municipalidadsanjose.archivo.service.PrestamoService;
 import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -49,7 +50,7 @@ public class PrestamoController {
     public ResponseEntity<PaginaResponseDTO<PrestamoResponseDTO>> listarTodos(
             @RequestParam(required = false) UUID expedienteId,
             @RequestParam(required = false) UUID solicitanteId,
-            @PageableDefault(size = 20, sort = "fechaSolicitud") Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "fechaSolicitud") Pageable pageable) {
         if (expedienteId != null) {
             return ResponseEntity.ok(PaginaResponseDTO.de(prestamoService.listarPorExpediente(expedienteId, pageable)));
         }

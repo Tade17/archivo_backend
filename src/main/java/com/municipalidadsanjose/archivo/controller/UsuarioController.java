@@ -5,6 +5,7 @@ import com.municipalidadsanjose.archivo.dto.usuario.UsuarioRequestDTO;
 import com.municipalidadsanjose.archivo.dto.usuario.UsuarioResponseDTO;
 import com.municipalidadsanjose.archivo.service.UsuarioService;
 import jakarta.validation.Valid;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
@@ -45,7 +46,7 @@ public class UsuarioController {
 
     @GetMapping
     public ResponseEntity<PaginaResponseDTO<UsuarioResponseDTO>> listarTodos(
-            @PageableDefault(size = 20, sort = "nombre") Pageable pageable) {
+            @ParameterObject @PageableDefault(size = 20, sort = "nombre") Pageable pageable) {
         return ResponseEntity.ok(PaginaResponseDTO.de(usuarioService.listarTodos(pageable)));
     }
 
