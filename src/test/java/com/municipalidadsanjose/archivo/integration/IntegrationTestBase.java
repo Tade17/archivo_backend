@@ -54,6 +54,16 @@ public abstract class IntegrationTestBase {
                         "Falta el rol ADMIN sembrado por V2__seed_admin.sql; ¿corrió Flyway?"));
     }
 
+    // Igual que obtenerRolAdmin, pero para los demás roles sembrados por Flyway
+    // (ARCHIVISTA, DIGITALIZACION, CONSULTA en V3): las reglas de SecurityConfig
+    // son por rol específico, así que un rol de prueba con nombre arbitrario
+    // (ver crearRol) no tiene ninguna autoridad concedida.
+    protected Rol obtenerRol(String nombre) {
+        return rolRepository.findByNombre(nombre)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Falta el rol " + nombre + " sembrado por las migraciones de Flyway"));
+    }
+
     protected Rol crearRol(String prefijoNombre) {
         Rol rol = new Rol();
         rol.setNombre(prefijoNombre + "_" + sufijoUnico());

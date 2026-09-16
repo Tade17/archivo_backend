@@ -34,7 +34,7 @@ class PrestamoIntegrationTest extends IntegrationTestBase {
 
     @Test
     void devolver_dosVeces_laSegundaDevuelve400() throws Exception {
-        Usuario usuario = crearUsuario(crearRol("TECNICO"), "Password123!", true);
+        Usuario usuario = crearUsuario(obtenerRol("ARCHIVISTA"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
         UUID expedienteId = crearExpediente(token, usuario);
 

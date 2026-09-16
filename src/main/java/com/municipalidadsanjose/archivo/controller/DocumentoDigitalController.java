@@ -4,6 +4,8 @@ import com.municipalidadsanjose.archivo.dto.common.PaginaResponseDTO;
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalActualizarDTO;
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalRequestDTO;
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalResponseDTO;
+import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
+import com.municipalidadsanjose.archivo.security.UsuarioPrincipal;
 import com.municipalidadsanjose.archivo.service.DocumentoDigitalService;
 import com.municipalidadsanjose.archivo.storage.ArchivoAlmacenado;
 import com.municipalidadsanjose.archivo.storage.FileStorageService;
@@ -18,6 +20,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -43,17 +49,37 @@ public class DocumentoDigitalController {
     // una sola vez). Cada archivo se guarda bajo storage/documentos/<expedienteId>/
     // y genera su propio DocumentoDigital, auditado individualmente.
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
     public ResponseEntity<List<DocumentoDigitalResponseDTO>> crear(
             @RequestParam UUID expedienteId,
             @RequestParam UUID tecnicoResponsableId,
             @RequestParam(required = false) String escanerUtilizado,
             @RequestParam(required = false) Integer resolucionDpi,
             @RequestParam(required = false) String formatoSalida,
-            @RequestParam("archivos") List<MultipartFile> archivos) {
+            @RequestParam("archivos") List<MultipartFile> archivos,
+            @AuthenticationPrincipal UsuarioPrincipal principal) {
+
+        if (archivos.isEmpty()) {
+            throw new SolicitudInvalidaException("Selecciona al menos un archivo.");
+        }
+        // El técnico responsable siempre es quien está autenticado, nunca lo que
+        // mande el cliente: evita que alguien le adjudique la subida a otro usuario.
+        tecnicoResponsableId = principal.getId();
 
         List<DocumentoDigitalResponseDTO> creados = new ArrayList<>();
         for (MultipartFile archivo : archivos) {
             ArchivoAlmacenado guardado = fileStorageService.guardar(expedienteId.toString(), archivo);
+            // Si la transacción falla después de guardar el archivo en disco (p.ej. un
+            // documento posterior del lote falla la validación), el archivo huérfano
+            // se borra: el filesystem no tiene rollback, así que lo hacemos a mano.
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
+                        fileStorageService.eliminar(guardado.rutaRelativa());
+                    }
+                }
+            });
             String nombreOriginal = archivo.getOriginalFilename() != null ? archivo.getOriginalFilename() : "documento";
 
             DocumentoDigitalRequestDTO dto = new DocumentoDigitalRequestDTO(

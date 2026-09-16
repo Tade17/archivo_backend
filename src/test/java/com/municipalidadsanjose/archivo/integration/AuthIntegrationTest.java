@@ -64,7 +64,7 @@ class AuthIntegrationTest extends IntegrationTestBase {
 
     @Test
     void endpointProtegido_conTokenValido_devuelve200() throws Exception {
-        Rol rol = crearRol("TECNICO");
+        Rol rol = obtenerRolAdmin();
         Usuario usuario = crearUsuario(rol, "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
 

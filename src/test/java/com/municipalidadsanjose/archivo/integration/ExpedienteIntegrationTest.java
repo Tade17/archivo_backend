@@ -24,7 +24,7 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
-        Usuario usuario = crearUsuario(crearRol("TECNICO"), "Password123!", true);
+        Usuario usuario = crearUsuario(obtenerRol("ARCHIVISTA"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
 
         String body = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());
@@ -52,7 +52,7 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
-        Usuario usuario = crearUsuario(crearRol("TECNICO"), "Password123!", true);
+        Usuario usuario = crearUsuario(obtenerRol("ARCHIVISTA"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
 
         String bodyCrear = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());

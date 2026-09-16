@@ -5,6 +5,7 @@ import com.municipalidadsanjose.archivo.security.JwtAuthenticationFilter;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -110,6 +111,17 @@ public class SecurityConfig {
                         // endpoints reales que Swagger UI invoque siguen exigiendo el
                         // JWT como cualquier otro request, vía el botón "Authorize".
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/api/workspace/**").authenticated()
+                        .requestMatchers("/api/auditoria/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers(HttpMethod.GET, "/api/usuarios/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/expedientes/**", "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers(HttpMethod.PUT, "/api/expedientes/**", "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers(HttpMethod.PATCH, "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers(HttpMethod.POST, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "DIGITALIZACION")
+                        .requestMatchers(HttpMethod.PUT, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "DIGITALIZACION")
+                        .requestMatchers("/api/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
