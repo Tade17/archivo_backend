@@ -63,7 +63,7 @@ public class SecurityConfig {
     @Bean
     public AccessDeniedHandler accessDeniedHandler() {
         return (request, response, accessDeniedException) ->
-                escribirError(response, HttpStatus.FORBIDDEN, "No tenés permisos para realizar esta acción");
+                escribirError(response, HttpStatus.FORBIDDEN, "Tu perfil no tiene acceso a esta función");
     }
 
     @Bean
@@ -112,15 +112,14 @@ public class SecurityConfig {
                         // JWT como cualquier otro request, vía el botón "Authorize".
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/workspace/**").authenticated()
-                        .requestMatchers("/api/auditoria/**").hasAnyRole("ADMIN", "ARCHIVISTA")
-                        .requestMatchers(HttpMethod.GET, "/api/usuarios/**").hasAnyRole("ADMIN", "ARCHIVISTA")
+                        .requestMatchers("/api/auditoria/**").hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/api/usuarios/**").hasRole("ADMIN")
                         .requestMatchers("/api/usuarios/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.GET, "/api/**").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/expedientes/**", "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
-                        .requestMatchers(HttpMethod.PUT, "/api/expedientes/**", "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
-                        .requestMatchers(HttpMethod.PATCH, "/api/prestamos/**").hasAnyRole("ADMIN", "ARCHIVISTA")
-                        .requestMatchers(HttpMethod.POST, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "DIGITALIZACION")
-                        .requestMatchers(HttpMethod.PUT, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "DIGITALIZACION")
+                        .requestMatchers(HttpMethod.POST, "/api/expedientes/**").hasAnyRole("ADMIN", "GESTOR_DOCUMENTAL")
+                        .requestMatchers(HttpMethod.PUT, "/api/expedientes/**").hasAnyRole("ADMIN", "GESTOR_DOCUMENTAL")
+                        .requestMatchers(HttpMethod.POST, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "GESTOR_DOCUMENTAL")
+                        .requestMatchers(HttpMethod.PUT, "/api/documentos-digitales/**").hasAnyRole("ADMIN", "GESTOR_DOCUMENTAL")
                         .requestMatchers("/api/**").hasRole("ADMIN")
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

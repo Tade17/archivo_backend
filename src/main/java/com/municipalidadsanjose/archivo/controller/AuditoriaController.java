@@ -10,8 +10,8 @@ import java.util.List;
 import java.util.UUID;
 
 // Solo lectura a propósito: los registros los crea el aspecto AOP, no un cliente.
-// Acceso restringido a ADMIN/ARCHIVISTA: el historial de auditoría es información sensible.
-@PreAuthorize("hasAnyRole('ADMIN','ARCHIVISTA')")
+// Acceso restringido a administradores y gestores documentales.
+@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/auditoria")
 public class AuditoriaController {

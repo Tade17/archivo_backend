@@ -75,7 +75,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("TipoDocumental", dto.tipoId()));
         EstadoExpediente estado = estadoExpedienteRepository.findById(dto.estadoId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("EstadoExpediente", dto.estadoId()));
-        Caja caja = cajaRepository.findById(dto.cajaId())
+        Caja caja = dto.cajaId() == null ? null : cajaRepository.findById(dto.cajaId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Caja", dto.cajaId()));
         Usuario creadoPor = usuarioRepository.findById(dto.creadoPorId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.creadoPorId()));
@@ -108,7 +108,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("TipoDocumental", dto.tipoId()));
         EstadoExpediente estado = estadoExpedienteRepository.findById(dto.estadoId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("EstadoExpediente", dto.estadoId()));
-        Caja caja = cajaRepository.findById(dto.cajaId())
+        Caja caja = dto.cajaId() == null ? null : cajaRepository.findById(dto.cajaId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Caja", dto.cajaId()));
         Usuario creadoPor = usuarioRepository.findById(dto.creadoPorId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.creadoPorId()));

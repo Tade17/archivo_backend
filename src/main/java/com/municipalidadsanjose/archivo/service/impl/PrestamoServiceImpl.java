@@ -8,6 +8,7 @@ import com.municipalidadsanjose.archivo.entity.Prestamo;
 import com.municipalidadsanjose.archivo.entity.Usuario;
 import com.municipalidadsanjose.archivo.enums.AccionAuditoria;
 import com.municipalidadsanjose.archivo.enums.EstadoPrestamo;
+import com.municipalidadsanjose.archivo.enums.TipoSolicitud;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
 import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.mapper.PrestamoMapper;
@@ -45,6 +46,9 @@ public class PrestamoServiceImpl implements PrestamoService {
     @Transactional
     @Auditable(entidad = "Prestamo", accion = AccionAuditoria.CREAR)
     public PrestamoResponseDTO crear(PrestamoRequestDTO dto) {
+        if (dto.tipoSolicitud() != TipoSolicitud.FISICO) {
+            throw new SolicitudInvalidaException("El sistema controla únicamente préstamos físicos. La consulta digital se registra mediante auditoría.");
+        }
         Expediente expediente = expedienteRepository.findById(dto.expedienteId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Expediente", dto.expedienteId()));
         Usuario solicitante = usuarioRepository.findById(dto.solicitanteId())
@@ -61,6 +65,9 @@ public class PrestamoServiceImpl implements PrestamoService {
     @Transactional
     @Auditable(entidad = "Prestamo", accion = AccionAuditoria.MODIFICAR)
     public PrestamoResponseDTO actualizar(UUID id, PrestamoRequestDTO dto) {
+        if (dto.tipoSolicitud() != TipoSolicitud.FISICO) {
+            throw new SolicitudInvalidaException("Un préstamo no puede cambiarse a modalidad digital.");
+        }
         Prestamo prestamo = prestamoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Prestamo", id));
 

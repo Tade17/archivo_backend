@@ -40,10 +40,15 @@ public class AreaResponsableServiceImpl implements AreaResponsableService {
         if (areaResponsableRepository.existsByNombre(dto.nombre())) {
             throw new RecursoDuplicadoException("Ya existe un área con el nombre: " + dto.nombre());
         }
-        if (areaResponsableRepository.existsByCodigo(dto.codigo())) {
+        String codigo = dto.codigo() == null || dto.codigo().isBlank()
+                ? "AREA-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase()
+                : dto.codigo().trim().toUpperCase();
+        if (areaResponsableRepository.existsByCodigo(codigo)) {
             throw new RecursoDuplicadoException("Ya existe un área con el código: " + dto.codigo());
         }
-        AreaResponsable guardada = areaResponsableRepository.save(areaResponsableMapper.toEntity(dto));
+        AreaResponsable area = areaResponsableMapper.toEntity(dto);
+        area.setCodigo(codigo);
+        AreaResponsable guardada = areaResponsableRepository.save(area);
         return areaResponsableMapper.toResponseDTO(guardada);
     }
 
@@ -57,12 +62,13 @@ public class AreaResponsableServiceImpl implements AreaResponsableService {
         if (!area.getNombre().equals(dto.nombre()) && areaResponsableRepository.existsByNombre(dto.nombre())) {
             throw new RecursoDuplicadoException("Ya existe un área con el nombre: " + dto.nombre());
         }
-        if (!area.getCodigo().equals(dto.codigo()) && areaResponsableRepository.existsByCodigo(dto.codigo())) {
+        String codigo = dto.codigo() == null || dto.codigo().isBlank() ? area.getCodigo() : dto.codigo().trim().toUpperCase();
+        if (!area.getCodigo().equals(codigo) && areaResponsableRepository.existsByCodigo(codigo)) {
             throw new RecursoDuplicadoException("Ya existe un área con el código: " + dto.codigo());
         }
 
         area.setNombre(dto.nombre());
-        area.setCodigo(dto.codigo());
+        area.setCodigo(codigo);
         return areaResponsableMapper.toResponseDTO(area);
     }
 

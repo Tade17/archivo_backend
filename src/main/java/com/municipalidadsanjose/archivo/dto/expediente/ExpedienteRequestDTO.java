@@ -34,7 +34,6 @@ public record ExpedienteRequestDTO(
 
         String glosa,
 
-        @NotNull(message = "La caja es obligatoria")
         UUID cajaId,
 
         Integer numeroFolios,

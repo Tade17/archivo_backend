@@ -1,6 +1,8 @@
 # archivo-backend
 
-Backend para el sistema de digitalización y gestión de archivo físico de la **Municipalidad Distrital de San José**. API REST hecha con Spring Boot para llevar el control de expedientes, su ubicación física (archivo central → estante → nivel → caja), su digitalización, préstamos y auditoría de todo lo que pasa en el sistema.
+Backend para el sistema de archivo digital de la **Municipalidad Distrital de San José**. La API administra expedientes digitales, documentos, usuarios, permisos y auditoría. El sistema ya no registra ubicaciones físicas, cajas ni préstamos.
+
+> Si ya tienes una base en Docker, sigue [ACTUALIZACION_BD_DOCKER.md](ACTUALIZACION_BD_DOCKER.md). No es necesario borrar el volumen: Flyway aplica las migraciones pendientes al iniciar el backend.
 
 ## Stack
 
@@ -29,7 +31,7 @@ docker compose up -d
 
 Esto levanta Postgres 17 en el **puerto 5433** del host (no 5432, para no chocar con un Postgres nativo que ya tengas instalado para otros proyectos). Los datos quedan en un volumen con nombre — `docker compose down` no los borra; `docker compose down -v` sí, si en algún momento querés arrancar de cero.
 
-Si preferís usar tu propio Postgres (nativo, sin Docker), creá una base llamada `archivo_sanjose` y saltá al paso 2 usando el profile por defecto (puerto 5432).
+Si prefieres usar tu propio PostgreSQL, crea una base llamada `archivo_sanjose` y configura `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD`.
 
 ### 2. Correr la aplicación
 
@@ -55,7 +57,7 @@ Al arrancar, Flyway crea el esquema completo y siembra un rol `ADMIN` y un usuar
 
 | Variable | Default | Para qué |
 |---|---|---|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5432`, `archivo_sanjose`, `postgres`, `1234` | Conexión a Postgres (no aplica si usás el profile `docker`, que fija el puerto a 5433) |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5433`, `archivo_sanjose`, `postgres`, `1234` | Conexión a PostgreSQL |
 | `JWT_SECRET` | un valor de desarrollo, **cambiar en producción** | Clave para firmar los JWT (HMAC-SHA256, mínimo 32 bytes) |
 | `JWT_EXPIRATION_MS` | `28800000` (8 horas) | Vigencia del token |
 | `STORAGE_BASE_DIR` | `./storage/documentos` | Carpeta donde se guardan los documentos digitalizados subidos |
@@ -88,14 +90,15 @@ Authorization: Bearer <token>
 
 ### Roles y permisos
 
-- **ADMIN**: acceso total. Es el único rol que puede crear/editar/borrar catálogos (roles, usuarios, áreas, tipos documentales, estados, estructura física del archivo) y ver la auditoría.
-- **Cualquier usuario autenticado**: puede crear/editar Expedientes, Documentos Digitales y Préstamos (el trabajo del día a día de un archivista/técnico). Los `DELETE` de esas entidades siguen siendo solo-ADMIN.
+- **ADMIN**: acceso total; administra usuarios y catálogos y consulta la actividad de seguridad.
+- **GESTOR_DOCUMENTAL**: crea y edita expedientes y carga documentos. No accede a usuarios, catálogos ni auditoría.
+- **LECTOR**: busca, visualiza y descarga documentos sin modificarlos.
 
 Los nombres de rol son datos libres en la tabla `rol`; la convención de autoridad interna es `ROLE_<NOMBRE_EN_MAYUSCULAS>`, así que para que un usuario tenga privilegios de administrador su rol debe llamarse exactamente `ADMIN`.
 
 ## Módulos / endpoints
 
-Todos bajo `/api`. Los de catálogo (`roles`, `areas-responsables`, `tipos-documentales`, `estados-expediente`, `archivos-centrales`, `estantes`, `niveles`, `cajas`, `tags`) siguen el mismo patrón CRUD: `POST` / `PUT /{id}` / `GET /{id}` / `GET` (paginado donde aplica) / `DELETE /{id}`.
+Todos los endpoints están bajo `/api`. Las áreas y los tipos documentales son los catálogos activos de este flujo digital.
 
 | Recurso | Base path | Notas |
 |---|---|---|
@@ -104,13 +107,12 @@ Todos bajo `/api`. Los de catálogo (`roles`, `areas-responsables`, `tipos-docum
 | Roles | `/api/roles` | — |
 | Expedientes | `/api/expedientes` | Paginado. Sin `DELETE`: un expediente nunca se borra, su ciclo de vida se maneja con `EstadoExpediente` |
 | Documentos digitales | `/api/documentos-digitales` | Ver sección de subida de archivos abajo |
-| Préstamos | `/api/prestamos` | `PATCH /{id}/devolver` cierra el préstamo. Filtros `?expedienteId=` / `?solicitanteId=` |
 | Auditoría | `/api/auditoria` | Solo lectura, solo ADMIN. Filtros `?entidadAfectada=` + `?entidadId=` |
-| Áreas, tipos documentales, estados, archivos centrales, estantes, niveles, cajas, tags | ver arriba | Catálogos, solo-ADMIN para escribir |
+| Áreas y tipos documentales | `/api/areas-responsables`, `/api/tipos-documentales` | Catálogos, solo ADMIN para escribir |
 
 ### Paginación
 
-Los listados de Expediente, Usuario, Préstamo y Documento Digital devuelven:
+Los listados de Expediente, Usuario y Documento Digital devuelven:
 
 ```json
 { "contenido": [...], "pagina": 0, "tamano": 20, "totalElementos": 42, "totalPaginas": 3 }

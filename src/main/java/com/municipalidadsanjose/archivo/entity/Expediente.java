@@ -62,7 +62,7 @@ public class Expediente {
     private String glosa;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "caja_id", nullable = false)
+    @JoinColumn(name = "caja_id")
     private Caja caja;
 
     @Column(name = "numero_folios")

@@ -71,4 +71,26 @@ class AuthIntegrationTest extends IntegrationTestBase {
         mockMvc.perform(get("/api/usuarios").header("Authorization", "Bearer " + token))
                 .andExpect(status().isOk());
     }
+
+    @Test
+    void gestor_noPuedeAccederAUsuariosNiActividadDeSeguridad() throws Exception {
+        Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
+        String token = login(usuario.getCorreo(), "Password123!");
+
+        mockMvc.perform(get("/api/usuarios").header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/workspace/auditoria/resumen")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void administrador_puedeAccederAActividadDeSeguridad() throws Exception {
+        Usuario usuario = crearUsuario(obtenerRolAdmin(), "Password123!", true);
+        String token = login(usuario.getCorreo(), "Password123!");
+
+        mockMvc.perform(get("/api/workspace/auditoria/resumen")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+    }
 }

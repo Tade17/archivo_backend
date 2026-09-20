@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -19,12 +20,38 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // saveAndFlush()/flush() explícito. También cubre la paginación de listarTodos().
 class ExpedienteIntegrationTest extends IntegrationTestBase {
 
+    @Test
+    void recepcionDigital_generaCorrelativoSinPedirNumeroAlUsuario() throws Exception {
+        var area = crearArea();
+        var tipo = crearTipoDocumental();
+        Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
+        String token = login(usuario.getCorreo(), "Password123!");
+        String body = """
+                {
+                  "numeroDocumento":"DOC-PRUEBA",
+                  "remitente":"Remitente Test",
+                  "areaDestinoId":"%s",
+                  "tipoId":"%s",
+                  "fechaDocumento":"%s",
+                  "asunto":"Documento digital de prueba",
+                  "glosa":""
+                }
+                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now());
+
+        mockMvc.perform(post("/api/workspace/recepcion")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.codigoUnico", matchesPattern("EXP-\\d{4}-\\d{6}")));
+    }
+
     private String crearExpedienteYObtenerRespuesta() throws Exception {
         Caja caja = crearCajaConJerarquia();
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
-        Usuario usuario = crearUsuario(obtenerRol("ARCHIVISTA"), "Password123!", true);
+        Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
 
         String body = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());
@@ -52,7 +79,7 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
-        Usuario usuario = crearUsuario(obtenerRol("ARCHIVISTA"), "Password123!", true);
+        Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
 
         String bodyCrear = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());
