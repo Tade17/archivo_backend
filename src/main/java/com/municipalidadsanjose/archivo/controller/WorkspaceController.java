@@ -39,6 +39,7 @@ public class WorkspaceController {
     e.estado_id AS "estadoId",es.nombre AS "estadoNombre",e.fecha_documento AS "fechaDocumento",
     e.fecha_registro AS "fechaRegistro",
     (SELECT d.documento_id FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoId",
+    (SELECT d.nombre_archivo FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoNombre",
     (SELECT count(*) FROM documento_digital d WHERE d.expediente_id=e.expediente_id) AS "totalDocumentos"
     """;
   private Map<String,Object> page(String columns,String from,List<Object> args,int page,int size,String order) {
