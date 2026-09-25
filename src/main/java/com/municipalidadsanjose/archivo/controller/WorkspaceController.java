@@ -56,7 +56,7 @@ public class WorkspaceController {
     var where=new StringBuilder(JOINS+" WHERE true");var args=new ArrayList<Object>();
     String text=q.getOrDefault("texto","").trim();
     if(!text.isEmpty()){
-      where.append(" AND (concat_ws(' ',e.codigo_unico,e.numero_documento,e.remitente,e.asunto,e.glosa) ILIKE ? OR EXISTS(SELECT 1 FROM documento_digital d WHERE d.expediente_id=e.expediente_id AND d.ocr_tsv @@ websearch_to_tsquery('spanish',?)))");
+      where.append(" AND (unaccent(concat_ws(' ',e.codigo_unico,e.numero_documento,e.remitente,e.asunto,e.glosa)) ILIKE unaccent(?) OR EXISTS(SELECT 1 FROM documento_digital d WHERE d.expediente_id=e.expediente_id AND d.ocr_tsv @@ websearch_to_tsquery('spanish',?)))");
       args.add("%"+text+"%");args.add(text);
     }
     equal(where,args,q,"codigo","e.codigo_unico");
@@ -129,7 +129,7 @@ public class WorkspaceController {
   public Map<String,Object> auditLog(@RequestParam Map<String,String> q,@RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="10") int size){
     var where=new StringBuilder("FROM auditoria a JOIN usuario u ON u.usuario_id=a.usuario_id WHERE true");var args=new ArrayList<Object>();
     equal(where,args,q,"accion","a.accion");equal(where,args,q,"modulo","a.entidad_afectada");
-    if(q.containsKey("usuario")&&!q.get("usuario").isBlank()){where.append(" AND u.nombre ILIKE ?");args.add("%"+q.get("usuario")+"%");}
+    if(q.containsKey("usuario")&&!q.get("usuario").isBlank()){where.append(" AND unaccent(u.nombre) ILIKE unaccent(?)");args.add("%"+q.get("usuario")+"%");}
     for(String key:List.of("desde","hasta"))if(q.containsKey(key)&&!q.get(key).isBlank()){where.append(" AND a.fecha::date ").append(key.equals("desde")?">=":"<=").append(" ?::date");args.add(q.get(key));}
     return page("a.auditoria_id AS id,u.nombre AS usuario,a.entidad_afectada AS modulo,a.entidad_id AS recurso,a.accion,a.fecha",where.toString(),args,page,size,"a.fecha DESC,a.auditoria_id");
   }
