@@ -10,36 +10,35 @@ export const USUARIOS = [
   { clave: 'segundo', nombre: 'Segundo Anselmo Damián Cajusol', correo: 'segundo.damian@sanjose.gob.pe', rol: 'LECTOR' },
 ];
 
+// Catálogos vigentes del sistema: solo 4 áreas y 4 tipos documentales.
 export const AREAS = [
   ['Alcaldía', 'ALC'],
   ['Gerencia Municipal', 'GM'],
   ['Secretaría General', 'SG'],
   ['Unidad de Trámite Documentario y Archivo', 'TDA'],
-  ['Oficina de Asesoría Jurídica', 'OAJ'],
-  ['Oficina de Planeamiento y Presupuesto', 'OPP'],
-  ['Órgano de Control Institucional', 'OCI'],
-  ['Gerencia de Administración y Finanzas', 'GAF'],
-  ['Sub Gerencia de Logística y Control Patrimonial', 'SGLCP'],
-  ['Sub Gerencia de Tesorería', 'SGT'],
-  ['Sub Gerencia de Recursos Humanos', 'SGRH'],
-  ['Gerencia de Administración Tributaria y Rentas', 'GATR'],
-  ['Gerencia de Desarrollo Urbano y Rural', 'GDUR'],
-  ['Sub Gerencia de Obras Privadas y Catastro', 'SGOPC'],
-  ['Sub Gerencia de Obras Públicas', 'SGOP'],
-  ['Sub Gerencia de Desarrollo Económico y Licencias', 'SGDEL'],
-  ['Gerencia de Servicios Públicos y Medio Ambiente', 'GSPMA'],
-  ['Sub Gerencia de Gestión de Riesgos y Defensa Civil', 'SGGRDC'],
-  ['Gerencia de Desarrollo Social', 'GDS'],
-  ['Defensoría Municipal del Niño y del Adolescente', 'DEMUNA'],
-  ['Oficina Municipal de Atención a las Personas con Discapacidad', 'OMAPED'],
-  ['Registro Civil', 'RC'],
 ];
 
-export const TIPOS = [
-  'Informe Técnico', 'Resolución de Alcaldía', 'Resolución Gerencial', 'Ordenanza Municipal', 'Acuerdo de Concejo',
-  'Acta', 'Contrato', 'Convenio', 'Licencia de Edificación', 'Licencia de Funcionamiento', 'Certificado', 'Constancia',
-  'Orden de Compra',
-];
+export const TIPOS = ['Oficio', 'Solicitud', 'Carta', 'Informe'];
+
+// Los expedientes de abajo conservan su área/tipo "de origen" (más descriptivo);
+// al sembrar se traducen a los catálogos vigentes con estos mapas.
+const AREA_A_VIGENTE = {
+  'Alcaldía': 'Alcaldía', 'Oficina de Planeamiento y Presupuesto': 'Alcaldía',
+  'Órgano de Control Institucional': 'Alcaldía', 'Oficina de Asesoría Jurídica': 'Alcaldía',
+  'Secretaría General': 'Secretaría General', 'Registro Civil': 'Secretaría General',
+  'Defensoría Municipal del Niño y del Adolescente': 'Secretaría General',
+  'Oficina Municipal de Atención a las Personas con Discapacidad': 'Secretaría General',
+  'Gerencia de Desarrollo Social': 'Secretaría General',
+  'Unidad de Trámite Documentario y Archivo': 'Unidad de Trámite Documentario y Archivo',
+};
+export const areaVigente = (nombre) => AREA_A_VIGENTE[nombre] ?? 'Gerencia Municipal';
+
+const TIPO_A_VIGENTE = {
+  'Licencia de Funcionamiento': 'Solicitud', 'Licencia de Edificación': 'Solicitud', 'Certificado': 'Solicitud', 'Constancia': 'Solicitud',
+  'Informe Técnico': 'Informe', 'Acta': 'Informe',
+  'Contrato': 'Carta', 'Orden de Compra': 'Carta',
+};
+export const tipoVigente = (nombre) => TIPO_A_VIGENTE[nombre] ?? 'Oficio';
 
 // Autoridades ficticias.
 const P = {

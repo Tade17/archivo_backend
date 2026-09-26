@@ -2,7 +2,7 @@
 // Uso (con backend y Postgres levantados):  node seed-demo.mjs
 // Es idempotente: si algo ya existe (área, tipo, usuario, expediente) lo omite.
 import { execFileSync } from 'node:child_process';
-import { AREAS, EXPEDIENTES, PASSWORD_DEMO, TIPOS, USUARIOS } from './data.mjs';
+import { AREAS, EXPEDIENTES, PASSWORD_DEMO, TIPOS, USUARIOS, areaVigente, tipoVigente } from './data.mjs';
 import { scanPdf, textPdf } from './pdf.mjs';
 
 const API = process.env.API_URL ?? 'http://localhost:8080/api';
@@ -68,7 +68,7 @@ for (const e of EXPEDIENTES) {
   }
   const exp = await call('POST', '/workspace/recepcion', {
     token: sesion.token,
-    json: { numeroDocumento: e.numeroDocumento, remitente: e.remitente, areaDestinoId: areas.get(e.area), tipoId: tipos.get(e.tipo), fechaDocumento: e.fecha, asunto: e.asunto, glosa: e.glosa },
+    json: { numeroDocumento: e.numeroDocumento, remitente: e.remitente, areaDestinoId: areas.get(areaVigente(e.area)), tipoId: tipos.get(tipoVigente(e.tipo)), fechaDocumento: e.fecha, asunto: e.asunto, glosa: e.glosa },
   });
   const archivos = new FormData();
   archivos.append('expedienteId', exp.id);

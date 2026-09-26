@@ -1,6 +1,6 @@
 # Datos de prueba (seed-demo)
 
-Carga una municipalidad de ejemplo en el sistema para probar el flujo completo: 4 usuarios, 22 áreas, 13 tipos documentales y **30 expedientes con 59 documentos PDF** (informes, resoluciones, contratos, actas, licencias…). Incluye 2 escaneos simulados sin texto, útiles para probar el OCR.
+Carga una municipalidad de ejemplo en el sistema para probar el flujo completo: 4 usuarios, 4 áreas (Alcaldía, Gerencia Municipal, Secretaría General, Trámite Documentario) y 4 tipos documentales (Oficio, Solicitud, Carta, Informe) y **30 expedientes con 59 documentos PDF** (informes, resoluciones, contratos, actas, licencias…). Incluye 2 escaneos simulados sin texto, útiles para probar el OCR.
 
 Todos los nombres, DNI, RUC, placas y montos son ficticios.
 
