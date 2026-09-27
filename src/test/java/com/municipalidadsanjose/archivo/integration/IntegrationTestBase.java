@@ -24,7 +24,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 // específicas de Postgres (uuid-ossp, jsonb) y el entorno no tiene el daemon
 // de Docker corriendo; si en el futuro se agrega, esta clase es el punto único
 // para migrar la configuración de datasource.
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.MOCK,
+        properties = "app.ocr.enabled=false")
 @AutoConfigureMockMvc
 @Transactional
 public abstract class IntegrationTestBase {

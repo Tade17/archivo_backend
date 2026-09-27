@@ -1,5 +1,6 @@
 package com.municipalidadsanjose.archivo.entity;
 
+import com.municipalidadsanjose.archivo.enums.EstadoOcr;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -59,6 +60,28 @@ public class DocumentoDigital {
 
     @Column(name = "ocr_texto", columnDefinition = "TEXT")
     private String ocrTexto;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "ocr_estado", nullable = false, length = 30)
+    private EstadoOcr ocrEstado = EstadoOcr.PENDIENTE;
+
+    @Column(name = "ocr_confianza", precision = 5, scale = 4)
+    private java.math.BigDecimal ocrConfianza;
+
+    @Column(name = "ocr_paginas")
+    private Integer ocrPaginas;
+
+    @Column(name = "ocr_error", columnDefinition = "TEXT")
+    private String ocrError;
+
+    @Column(name = "ocr_intentos", nullable = false)
+    private int ocrIntentos;
+
+    @Column(name = "ocr_revisado", nullable = false)
+    private boolean ocrRevisado;
+
+    @Column(name = "ocr_actualizado_en")
+    private LocalDateTime ocrActualizadoEn;
 
     // ocr_tsv NO se mapea: es una columna TSVECTOR que Postgres recalcula solo
     // (trigger trg_documento_ocr_tsv) a partir de ocr_texto. La app nunca la

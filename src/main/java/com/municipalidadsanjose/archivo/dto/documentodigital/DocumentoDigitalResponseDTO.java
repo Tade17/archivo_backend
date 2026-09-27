@@ -1,5 +1,8 @@
 package com.municipalidadsanjose.archivo.dto.documentodigital;
 
+import com.municipalidadsanjose.archivo.enums.EstadoOcr;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -17,6 +20,13 @@ public record DocumentoDigitalResponseDTO(
         Integer resolucionDpi,
         String formatoSalida,
         String ocrTexto,
+        EstadoOcr ocrEstado,
+        BigDecimal ocrConfianza,
+        Integer ocrPaginas,
+        String ocrError,
+        int ocrIntentos,
+        boolean ocrRevisado,
+        LocalDateTime ocrActualizadoEn,
         LocalDateTime fechaActualizacion
 ) {
 }

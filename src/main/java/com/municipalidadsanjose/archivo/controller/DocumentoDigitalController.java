@@ -6,6 +6,7 @@ import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalReq
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalResponseDTO;
 import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.security.UsuarioPrincipal;
+import com.municipalidadsanjose.archivo.ocr.OcrService;
 import com.municipalidadsanjose.archivo.service.DocumentoDigitalService;
 import com.municipalidadsanjose.archivo.storage.ArchivoAlmacenado;
 import com.municipalidadsanjose.archivo.storage.FileStorageService;
@@ -37,11 +38,14 @@ public class DocumentoDigitalController {
 
     private final DocumentoDigitalService documentoDigitalService;
     private final FileStorageService fileStorageService;
+    private final OcrService ocrService;
 
     public DocumentoDigitalController(DocumentoDigitalService documentoDigitalService,
-                                       FileStorageService fileStorageService) {
+                                       FileStorageService fileStorageService,
+                                       OcrService ocrService) {
         this.documentoDigitalService = documentoDigitalService;
         this.fileStorageService = fileStorageService;
+        this.ocrService = ocrService;
     }
 
     // Acepta uno o varios archivos en un solo request (flujo de digitalización
@@ -100,8 +104,16 @@ public class DocumentoDigitalController {
 
     @PutMapping("/{id}")
     public ResponseEntity<DocumentoDigitalResponseDTO> actualizar(@PathVariable UUID id,
-                                                                   @Valid @RequestBody DocumentoDigitalActualizarDTO dto) {
-        return ResponseEntity.ok(documentoDigitalService.actualizar(id, dto));
+                                                                   @Valid @RequestBody DocumentoDigitalActualizarDTO dto,
+                                                                   @AuthenticationPrincipal UsuarioPrincipal principal) {
+        DocumentoDigitalActualizarDTO datosSeguros = new DocumentoDigitalActualizarDTO(
+                dto.nombreArchivo(),
+                principal.getId(),
+                dto.escanerUtilizado(),
+                dto.resolucionDpi(),
+                dto.formatoSalida(),
+                dto.ocrTexto());
+        return ResponseEntity.ok(documentoDigitalService.actualizar(id, datosSeguros));
     }
 
     @GetMapping("/{id}")
@@ -117,6 +129,12 @@ public class DocumentoDigitalController {
             return ResponseEntity.ok(PaginaResponseDTO.de(documentoDigitalService.listarPorExpediente(expedienteId, pageable)));
         }
         return ResponseEntity.ok(PaginaResponseDTO.de(documentoDigitalService.listarTodos(pageable)));
+    }
+
+    @PostMapping("/{id}/ocr/reintentar")
+    public ResponseEntity<Void> reintentarOcr(@PathVariable UUID id) {
+        ocrService.reintentar(id);
+        return ResponseEntity.accepted().build();
     }
 
     // Deja constancia en auditoría (accion=DESCARGAR) de quién bajó el archivo,

@@ -20,6 +20,24 @@ services:
       timeout: 5s
       retries: 10
 
+  ocr:
+    build:
+      context: ./ocr_service
+    container_name: archivo-ocr
+    restart: unless-stopped
+    environment:
+      OCR_MAX_BYTES: "26214400"
+      OCR_MAX_PAGES: "100"
+      OCR_PDF_DPI: "220"
+    ports:
+      - "127.0.0.1:8091:8091"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
 # Los datos persisten en un volumen con nombre (no en el filesystem del
 # contenedor): "docker compose down" no borra la base; "docker compose down -v"
 # sí, si en algún momento se quiere arrancar de cero.

@@ -81,7 +81,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccesoDenegado(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                .body(new ErrorResponse(HttpStatus.FORBIDDEN.value(), "No tenés permisos para realizar esta acción"));
+                .body(new ErrorResponse(HttpStatus.FORBIDDEN.value(), "Tu perfil no tiene acceso a esta función"));
     }
 
     // Se dispara a nivel framework (spring.servlet.multipart.max-*), antes de

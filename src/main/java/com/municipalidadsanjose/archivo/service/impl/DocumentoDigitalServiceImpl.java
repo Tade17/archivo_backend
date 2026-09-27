@@ -10,6 +10,8 @@ import com.municipalidadsanjose.archivo.entity.Usuario;
 import com.municipalidadsanjose.archivo.enums.AccionAuditoria;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
 import com.municipalidadsanjose.archivo.mapper.DocumentoDigitalMapper;
+import com.municipalidadsanjose.archivo.enums.EstadoOcr;
+import com.municipalidadsanjose.archivo.ocr.OcrService;
 import com.municipalidadsanjose.archivo.repository.DocumentoDigitalRepository;
 import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
 import com.municipalidadsanjose.archivo.repository.UsuarioRepository;
@@ -21,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 @Service
 public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
@@ -30,17 +33,20 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
     private final UsuarioRepository usuarioRepository;
     private final DocumentoDigitalMapper documentoDigitalMapper;
     private final FileStorageService fileStorageService;
+    private final OcrService ocrService;
 
     public DocumentoDigitalServiceImpl(DocumentoDigitalRepository documentoDigitalRepository,
                                         ExpedienteRepository expedienteRepository,
                                         UsuarioRepository usuarioRepository,
                                         DocumentoDigitalMapper documentoDigitalMapper,
-                                        FileStorageService fileStorageService) {
+                                        FileStorageService fileStorageService,
+                                        OcrService ocrService) {
         this.documentoDigitalRepository = documentoDigitalRepository;
         this.expedienteRepository = expedienteRepository;
         this.usuarioRepository = usuarioRepository;
         this.documentoDigitalMapper = documentoDigitalMapper;
         this.fileStorageService = fileStorageService;
+        this.ocrService = ocrService;
     }
 
     @Override
@@ -57,6 +63,7 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         // porque el INSERT recién se ejecuta al hacer commit, no al llamar a save().
         DocumentoDigital guardado = documentoDigitalRepository.saveAndFlush(
                 documentoDigitalMapper.toEntity(dto, expediente, tecnicoResponsable));
+        ocrService.solicitar(guardado.getId());
         return documentoDigitalMapper.toResponseDTO(guardado);
     }
 
@@ -80,6 +87,12 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         documento.setResolucionDpi(dto.resolucionDpi());
         documento.setFormatoSalida(dto.formatoSalida());
         documento.setOcrTexto(dto.ocrTexto());
+        documento.setOcrEstado(dto.ocrTexto() == null || dto.ocrTexto().isBlank()
+                ? EstadoOcr.REQUIERE_REVISION
+                : EstadoOcr.COMPLETADO);
+        documento.setOcrError(null);
+        documento.setOcrRevisado(true);
+        documento.setOcrActualizadoEn(LocalDateTime.now());
 
         // idem que en crear(): sin flush, fechaActualizacion en la respuesta
         // muestra el valor viejo en vez del que Hibernate acaba de generar.

@@ -14,7 +14,7 @@ Esta guía permite levantar o actualizar la base de datos del proyecto sin perde
 3. Inicia o confirma el contenedor de PostgreSQL:
 
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    docker compose ps
    ```
 
@@ -43,6 +43,7 @@ El backend se conecta por defecto a `localhost:5433`, que es el puerto publicado
   - crea los perfiles `GESTOR_DOCUMENTAL` y `LECTOR`;
   - migra automáticamente los usuarios con roles anteriores;
   - crea el contador anual utilizado para generar números de expediente sin intervención del usuario.
+- `V6__ocr_automatico.sql`: añade estados, confianza, errores y recuperación del reconocimiento automático sin eliminar transcripciones existentes.
 
 Estas migraciones conservan los expedientes, documentos y usuarios existentes.
 
@@ -51,7 +52,7 @@ Estas migraciones conservan los expedientes, documentos y usuarios existentes.
 En el inicio del backend debe aparecer un mensaje similar a:
 
 ```text
-Current version of schema "public": 5
+Current version of schema "public": 6
 Schema "public" is up to date
 ```
 
@@ -61,18 +62,18 @@ También se puede consultar directamente dentro del contenedor:
 docker exec archivo-postgres psql -U postgres -d archivo_sanjose -c "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
 ```
 
-Todas las filas deben tener `success = true` y la última versión debe ser `5`.
+Todas las filas deben tener `success = true` y la última versión debe ser `6`.
 
 ## Primera instalación
 
 En un equipo sin datos previos basta con ejecutar:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ./mvnw spring-boot:run
 ```
 
-Flyway creará el esquema completo y aplicará las migraciones de `V1` a `V5`.
+Flyway creará el esquema completo y aplicará las migraciones de `V1` a `V6`.
 
 ## Reglas importantes
 

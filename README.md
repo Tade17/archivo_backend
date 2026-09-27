@@ -11,6 +11,7 @@ Backend para el sistema de archivo digital de la **Municipalidad Distrital de Sa
 - Spring Security + JWT (autenticación y autorización por rol)
 - Spring Data JPA / Hibernate
 - Maven
+- RapidOCR + PP-OCRv5 latino + ONNX Runtime (servicio local en Docker)
 
 ## Requisitos
 
@@ -26,10 +27,10 @@ No hace falta instalar Maven: el repo trae el wrapper (`./mvnw` / `mvnw.cmd`).
 La forma más simple es con el Postgres que ya viene armado en `docker-compose.yml`:
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-Esto levanta Postgres 17 en el **puerto 5433** del host (no 5432, para no chocar con un Postgres nativo que ya tengas instalado para otros proyectos). Los datos quedan en un volumen con nombre — `docker compose down` no los borra; `docker compose down -v` sí, si en algún momento querés arrancar de cero.
+Esto levanta PostgreSQL 17 en el **puerto 5433** y el servicio OCR local en `127.0.0.1:8091`. Los datos quedan en un volumen con nombre: `docker compose down` no los borra; `docker compose down -v` sí. Consulta [OCR.md](OCR.md) para conocer el procesamiento automático y sus estados.
 
 Si prefieres usar tu propio PostgreSQL, crea una base llamada `archivo_sanjose` y configura `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD`.
 
@@ -63,6 +64,8 @@ Al arrancar, Flyway crea el esquema completo y siembra un rol `ADMIN` y un usuar
 | `STORAGE_BASE_DIR` | `./storage/documentos` | Carpeta donde se guardan los documentos digitalizados subidos |
 | `STORAGE_MAX_FILE_SIZE_BYTES` | `20971520` (20 MB) | Tamaño máximo por archivo |
 | `STORAGE_TIPOS_MIME_PERMITIDOS` | `application/pdf,image/jpeg,image/png,image/tiff` | Lista blanca de tipos MIME aceptados al subir un documento |
+| `OCR_ENABLED`, `OCR_URL` | `true`, `http://localhost:8091` | Activación y dirección del servicio OCR local |
+| `OCR_TIMEOUT_SECONDS`, `OCR_REVIEW_THRESHOLD` | `300`, `0.75` | Tiempo máximo y confianza mínima antes de solicitar revisión |
 
 ## Usuario administrador semilla
 

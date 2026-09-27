@@ -40,6 +40,13 @@ public class DocumentoDigitalMapper {
                 documento.getResolucionDpi(),
                 documento.getFormatoSalida(),
                 documento.getOcrTexto(),
+                documento.getOcrEstado(),
+                documento.getOcrConfianza(),
+                documento.getOcrPaginas(),
+                documento.getOcrError(),
+                documento.getOcrIntentos(),
+                documento.isOcrRevisado(),
+                documento.getOcrActualizadoEn(),
                 documento.getFechaActualizacion()
         );
     }
