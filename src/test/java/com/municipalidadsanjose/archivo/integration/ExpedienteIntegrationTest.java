@@ -10,6 +10,8 @@ import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -44,6 +46,45 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
                         .content(body))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.codigoUnico", matchesPattern("EXP-\\d{4}-\\d{6}")));
+    }
+
+    @Test
+    void buscar_ignoraTildesYMayusculas() throws Exception {
+        var area = crearArea();
+        var tipo = crearTipoDocumental();
+        Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
+        String token = login(usuario.getCorreo(), "Password123!");
+        String body = """
+                {
+                  "numeroDocumento":"DOC-TILDES",
+                  "remitente":"Remitente Test",
+                  "areaDestinoId":"%s",
+                  "tipoId":"%s",
+                  "fechaDocumento":"%s",
+                  "asunto":"Inspección del CAMIÓN zorzalito",
+                  "glosa":""
+                }
+                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now());
+        mockMvc.perform(post("/api/workspace/recepcion")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        // Sin tilde y en minúsculas encuentra el asunto escrito con tilde y en mayúsculas...
+        mockMvc.perform(get("/api/workspace/buscar")
+                        .param("texto", "inspeccion del camion zorzalito")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElementos", greaterThanOrEqualTo(1)))
+                .andExpect(jsonPath("$.contenido[0].asunto", containsString("zorzalito")));
+
+        // ...y con tilde también.
+        mockMvc.perform(get("/api/workspace/buscar")
+                        .param("texto", "camión zorzalito")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElementos", greaterThanOrEqualTo(1)));
     }
 
     private String crearExpedienteYObtenerRespuesta() throws Exception {
