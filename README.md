@@ -36,20 +36,20 @@ Si prefieres usar tu propio PostgreSQL, crea una base llamada `archivo_sanjose` 
 
 ### 2. Correr la aplicación
 
-Con el Postgres de Docker (puerto 5433), activá el profile `docker`:
-
-```bash
-# Windows (PowerShell)
-$env:SPRING_PROFILES_ACTIVE="docker"; ./mvnw spring-boot:run
-
-# Bash / Git Bash
-SPRING_PROFILES_ACTIVE=docker ./mvnw spring-boot:run
-```
-
-Con un Postgres propio en el puerto 5432 (default), simplemente:
+El default de `application.properties` ya apunta al Postgres de Docker (puerto **5433**), así que con eso alcanza:
 
 ```bash
 ./mvnw spring-boot:run
+```
+
+Si en cambio usás tu propio Postgres nativo (normalmente puerto 5432), sobreescribí el puerto con una variable de entorno:
+
+```bash
+# Windows (PowerShell)
+$env:DB_PORT="5432"; ./mvnw spring-boot:run
+
+# Bash / Git Bash
+DB_PORT=5432 ./mvnw spring-boot:run
 ```
 
 Al arrancar, Flyway crea el esquema completo y siembra un rol `ADMIN` y un usuario administrador (ver credenciales abajo). La app queda escuchando en `http://localhost:8080`.

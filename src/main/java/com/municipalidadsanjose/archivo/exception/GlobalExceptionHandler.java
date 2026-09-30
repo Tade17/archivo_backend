@@ -42,8 +42,7 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(HttpStatus.CONFLICT.value(), ex.getMessage()));
     }
 
-    // Red de seguridad: cualquier violación de FK/constraint que se nos haya
-    // escapado sin un chequeo manual previo cae acá, en vez de un 500 genérico.
+    // Red de seguridad: cualquier violación de FK/constraint en vez de un 500 genérico.
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleIntegridadDatos(DataIntegrityViolationException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
