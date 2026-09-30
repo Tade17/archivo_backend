@@ -112,6 +112,24 @@ public class FileSystemStorageService implements FileStorageService {
     }
 
     @Override
+    public String guardarPdf(String subcarpeta, byte[] contenido) {
+        if (contenido == null || contenido.length < 5
+                || !new String(contenido, 0, 5, java.nio.charset.StandardCharsets.US_ASCII).equals("%PDF-")) {
+            throw new SolicitudInvalidaException("El servicio no devolvió un PDF válido.");
+        }
+        Path directorio = baseDir.resolve(subcarpeta).normalize();
+        if (!directorio.startsWith(baseDir)) throw new SolicitudInvalidaException("Subcarpeta inválida");
+        try {
+            Files.createDirectories(directorio);
+            Path destino = directorio.resolve(UUID.randomUUID() + "-ocr.pdf");
+            Files.write(destino, contenido, java.nio.file.StandardOpenOption.CREATE_NEW);
+            return baseDir.relativize(destino).toString().replace('\\', '/');
+        } catch (IOException e) {
+            throw new IllegalStateException("No se pudo guardar el PDF digitalizado.", e);
+        }
+    }
+
+    @Override
     public void eliminar(String rutaRelativa) {
         Path ruta = baseDir.resolve(rutaRelativa).normalize();
         if (!ruta.startsWith(baseDir)) {

@@ -7,6 +7,8 @@ public record OcrResultado(
         BigDecimal confidence,
         int pages,
         int lines,
-        String model
+        String model,
+        java.util.List<OcrPagina> layout,
+        String pdfBase64
 ) {
 }

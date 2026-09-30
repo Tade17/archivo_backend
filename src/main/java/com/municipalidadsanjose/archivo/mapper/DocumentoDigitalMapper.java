@@ -47,7 +47,8 @@ public class DocumentoDigitalMapper {
                 documento.getOcrIntentos(),
                 documento.isOcrRevisado(),
                 documento.getOcrActualizadoEn(),
-                documento.getFechaActualizacion()
+                documento.getFechaActualizacion(),
+                documento.getRutaPdf() != null
         );
     }
 }

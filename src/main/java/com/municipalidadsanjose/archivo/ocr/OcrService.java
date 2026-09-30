@@ -37,10 +37,13 @@ public class OcrService {
 
     @Transactional
     public void reintentar(UUID documentoId) {
-        DocumentoDigital documento = documentos.findById(documentoId)
+        DocumentoDigital documento = documentos.findLockedById(documentoId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", documentoId));
         if (documento.getOcrEstado() == EstadoOcr.PROCESANDO) {
             throw new SolicitudInvalidaException("El documento ya se está procesando.");
+        }
+        if (documento.isOcrRevisado()) {
+            throw new SolicitudInvalidaException("El texto contiene correcciones guardadas. Reprocesarlo las reemplazaría; conserva y edita el PDF actual.");
         }
         documentos.marcarPendiente(documentoId, LocalDateTime.now());
         solicitar(documentoId);
@@ -50,6 +53,7 @@ public class OcrService {
     public void recuperarPendientes() {
         if (!enabled) return;
         documentos.recuperarProcesamientosInterrumpidos(LocalDateTime.now());
+        documentos.programarPdfFaltantes();
         List<UUID> pendientes = documentos.findIdsByOcrEstadoIn(List.of(EstadoOcr.PENDIENTE));
         pendientes.forEach(this::solicitar);
     }

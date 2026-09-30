@@ -13,6 +13,8 @@ public interface FileStorageService {
     // Lanza SolicitudInvalidaException si no pasa la validación.
     ArchivoAlmacenado guardar(String subcarpeta, MultipartFile archivo);
 
+    String guardarPdf(String subcarpeta, byte[] contenido);
+
     // rutaRelativa es la que devolvió guardar(): relativa al directorio base.
     Resource cargarComoRecurso(String rutaRelativa);
 

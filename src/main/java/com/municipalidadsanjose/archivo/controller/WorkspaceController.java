@@ -25,8 +25,11 @@ public class WorkspaceController {
   private final ExpedienteService expedientes;
   private final DocumentoDigitalService documentos;
   private final FileStorageService storage;
-  public WorkspaceController(JdbcTemplate db, ExpedienteService e, DocumentoDigitalService d, FileStorageService s) {
+  private final com.municipalidadsanjose.archivo.ocr.OcrPdfService pdf;
+  public WorkspaceController(JdbcTemplate db, ExpedienteService e, DocumentoDigitalService d, FileStorageService s,
+      com.municipalidadsanjose.archivo.ocr.OcrPdfService pdf) {
     this.db=db; expedientes=e; documentos=d; storage=s;
+    this.pdf=pdf;
   }
   private static final String JOINS = """
     FROM expediente e JOIN area_responsable a ON a.area_id=e.area_destino_id
@@ -119,9 +122,9 @@ public class WorkspaceController {
   @GetMapping("/documentos/{id}/vista")
   @Transactional
   public ResponseEntity<Resource> preview(@PathVariable UUID id,@AuthenticationPrincipal UsuarioPrincipal user){
-    var d=documentos.buscarPorId(id);var resource=storage.cargarComoRecurso(d.rutaAlmacenamiento());
+    var d=documentos.buscarPorId(id);var resource=storage.cargarComoRecurso(d.pdfDisponible()?pdf.rutaPdf(id):d.rutaAlmacenamiento());
     audit(user.getId(),"DocumentoDigital",id,"CONSULTAR");
-    return ResponseEntity.ok().contentType(MediaType.parseMediaType(d.tipoMime()))
+    return ResponseEntity.ok().contentType(d.pdfDisponible()?MediaType.APPLICATION_PDF:MediaType.parseMediaType(d.tipoMime()))
       .header(HttpHeaders.CACHE_CONTROL,"private, no-store")
       .header(HttpHeaders.CONTENT_DISPOSITION,ContentDisposition.inline().filename(d.nombreArchivo()).build().toString()).body(resource);
   }

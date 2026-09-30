@@ -7,15 +7,17 @@ from functools import lru_cache
 
 import numpy as np
 import pypdfium2 as pdfium
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Response
 from PIL import Image, ImageSequence
 from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
+from searchable_pdf import build_pdf
 
 app = FastAPI(title="OCR Archivo Municipal", docs_url=None, redoc_url=None)
 
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", str(25 * 1024 * 1024)))
 MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "100"))
 PDF_DPI = int(os.getenv("OCR_PDF_DPI", "220"))
+MAX_PIXELS = int(os.getenv("OCR_MAX_PIXELS", "250000000"))
 _engine_lock = threading.Lock()
 
 
@@ -51,16 +53,40 @@ def decode_filename(value: str | None) -> str:
 def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Image]:
     is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
     if is_pdf:
-        document = pdfium.PdfDocument(data)
-        if len(document) > MAX_PAGES:
-            raise ValueError(f"El PDF supera el máximo de {MAX_PAGES} páginas")
-        scale = PDF_DPI / 72
-        return [page.render(scale=scale).to_pil().convert("RGB") for page in document]
+        pages = []
+        pixels = 0
+        with pdfium.PdfDocument(data) as document:
+            if len(document) > MAX_PAGES:
+                raise ValueError(f"El PDF supera el máximo de {MAX_PAGES} páginas")
+            scale = PDF_DPI / 72
+            for index in range(len(document)):
+                page = document[index]
+                try:
+                    width, height = page.get_size()
+                    pixels += int(width * scale + 1) * int(height * scale + 1)
+                    if pixels > MAX_PIXELS:
+                        raise ValueError("El documento supera el máximo de píxeles permitido")
+                    bitmap = page.render(scale=scale)
+                    try:
+                        pages.append(bitmap.to_pil().convert("RGB"))
+                    finally:
+                        bitmap.close()
+                finally:
+                    page.close()
+        return pages
 
     with Image.open(io.BytesIO(data)) as image:
-        pages = [frame.copy().convert("RGB") for frame in ImageSequence.Iterator(image)]
-    if len(pages) > MAX_PAGES:
-        raise ValueError(f"El documento supera el máximo de {MAX_PAGES} páginas")
+        pages = []
+        pixels = 0
+        for frame in ImageSequence.Iterator(image):
+            if len(pages) >= MAX_PAGES:
+                raise ValueError(f"El documento supera el máximo de {MAX_PAGES} páginas")
+            pixels += frame.width * frame.height
+            if pixels > MAX_PIXELS:
+                raise ValueError("El documento supera el máximo de píxeles permitido")
+            pages.append(frame.copy().convert("RGB"))
+    if not pages:
+        raise ValueError("El documento no contiene páginas")
     return pages
 
 
@@ -70,14 +96,29 @@ def recognize(data: bytes, content_type: str, filename: str) -> dict:
     weighted_score = 0.0
     weight = 0
     total_lines = 0
+    layout = []
     engine = get_engine()
 
     for page_number, image in enumerate(pages, start=1):
         # RapidOCR mantiene el orden de lectura de las líneas detectadas.
         with _engine_lock:
             result = engine(np.asarray(image))
-        page_texts = list(result.txts or ())
-        page_scores = list(result.scores or ())
+        page_texts = list(result.txts) if result.txts is not None else []
+        page_scores = list(result.scores) if result.scores is not None else []
+        page_boxes = list(result.boxes) if result.boxes is not None else []
+        blocks = []
+        for index, (text, box) in enumerate(zip(page_texts, page_boxes)):
+            points = np.asarray(box, dtype=float).reshape(-1, 2)
+            if not np.isfinite(points).all():
+                continue
+            x = max(0.0, min(float(points[:, 0].min()), image.width - 1.0))
+            y = max(0.0, min(float(points[:, 1].min()), image.height - 1.0))
+            right = max(x + 1, min(float(points[:, 0].max()), float(image.width)))
+            bottom = max(y + 1, min(float(points[:, 1].max()), float(image.height)))
+            blocks.append({"id": str(index), "text": text.strip(), "x": x, "y": y,
+                           "width": right - x, "height": bottom - y,
+                           "confidence": float(page_scores[index]) if index < len(page_scores) else 0.0})
+        layout.append({"width": image.width, "height": image.height, "blocks": blocks})
         if len(pages) > 1:
             texts.append(f"[Página {page_number}]")
         texts.extend(text.strip() for text in page_texts if text and text.strip())
@@ -95,6 +136,8 @@ def recognize(data: bytes, content_type: str, filename: str) -> dict:
         "pages": len(pages),
         "lines": total_lines,
         "model": "PP-OCRv5 latin / ONNX Runtime",
+        "layout": layout,
+        "pdfBase64": base64.b64encode(build_pdf(pages, layout, PDF_DPI)).decode("ascii"),
     }
 
 
@@ -124,3 +167,36 @@ async def ocr(
             status_code=422,
             detail=f"No se pudo reconocer el contenido de {filename}",
         ) from error
+
+
+@app.post("/pdf")
+async def regenerate_pdf(request: Request) -> Response:
+    # Bound the JSON envelope as well as the decoded original before rendering it.
+    body = await request.body()
+    if len(body) > MAX_BYTES * 2 + 12_000_000:
+        raise HTTPException(status_code=413, detail="La solicitud supera el tamaño permitido")
+    try:
+        import json
+        payload = json.loads(body)
+        if not isinstance(payload, dict) or not isinstance(payload.get("fileBase64"), str):
+            raise ValueError("Debe proporcionar el archivo original")
+        data = base64.b64decode(payload["fileBase64"], validate=True)
+        if not data:
+            raise ValueError("El archivo está vacío")
+        if len(data) > MAX_BYTES:
+            raise HTTPException(status_code=413, detail="El archivo supera el tamaño permitido")
+        content_type = payload.get("contentType", "application/octet-stream")
+        filename = payload.get("filename", "documento")
+        if not isinstance(content_type, str) or not isinstance(filename, str):
+            raise ValueError("Tipo de archivo o nombre inválido")
+        def generate() -> bytes:
+            pages = render_pages(data, content_type, filename)
+            return build_pdf(pages, payload.get("layout"), PDF_DPI)
+        result = await asyncio.to_thread(generate)
+        return Response(content=result, media_type="application/pdf")
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="No se pudo generar el PDF del documento") from error

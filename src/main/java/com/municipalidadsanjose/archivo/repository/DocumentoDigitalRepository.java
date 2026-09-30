@@ -17,6 +17,14 @@ import java.util.List;
 import java.util.UUID;
 
 public interface DocumentoDigitalRepository extends JpaRepository<DocumentoDigital, UUID> {
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from DocumentoDigital d where d.id = :id")
+    java.util.Optional<DocumentoDigital> findLockedById(@Param("id") UUID id);
+
+    @Modifying
+    @Transactional
+    @Query("update DocumentoDigital d set d.ocrEstado = com.municipalidadsanjose.archivo.enums.EstadoOcr.PENDIENTE where d.rutaPdf is null and d.ocrRevisado = false and d.ocrEstado in (com.municipalidadsanjose.archivo.enums.EstadoOcr.COMPLETADO, com.municipalidadsanjose.archivo.enums.EstadoOcr.REQUIERE_REVISION)")
+    int programarPdfFaltantes();
     Page<DocumentoDigital> findByExpedienteId(UUID expedienteId, Pageable pageable);
 
     @Query("select d.id from DocumentoDigital d where d.ocrEstado in :estados")
@@ -67,6 +75,9 @@ public interface DocumentoDigitalRepository extends JpaRepository<DocumentoDigit
                    d.ocrEstado = :estado,
                    d.ocrError = null,
                    d.ocrRevisado = false,
+                   d.ocrLayout = :layout,
+                   d.rutaPdf = :rutaPdf,
+                   d.ocrVersion = d.ocrVersion + 1,
                    d.ocrActualizadoEn = :ahora
              where d.id = :id
             """)
@@ -75,6 +86,8 @@ public interface DocumentoDigitalRepository extends JpaRepository<DocumentoDigit
                             @Param("confianza") BigDecimal confianza,
                             @Param("paginas") int paginas,
                             @Param("estado") EstadoOcr estado,
+                            @Param("layout") String layout,
+                            @Param("rutaPdf") String rutaPdf,
                             @Param("ahora") LocalDateTime ahora);
 
     @Modifying

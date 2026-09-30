@@ -27,6 +27,7 @@ public record DocumentoDigitalResponseDTO(
         int ocrIntentos,
         boolean ocrRevisado,
         LocalDateTime ocrActualizadoEn,
-        LocalDateTime fechaActualizacion
+        LocalDateTime fechaActualizacion,
+        boolean pdfDisponible
 ) {
 }

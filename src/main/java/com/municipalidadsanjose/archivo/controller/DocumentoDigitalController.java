@@ -39,13 +39,16 @@ public class DocumentoDigitalController {
     private final DocumentoDigitalService documentoDigitalService;
     private final FileStorageService fileStorageService;
     private final OcrService ocrService;
+    private final com.municipalidadsanjose.archivo.ocr.OcrPdfService ocrPdf;
 
     public DocumentoDigitalController(DocumentoDigitalService documentoDigitalService,
                                        FileStorageService fileStorageService,
-                                       OcrService ocrService) {
+                                       OcrService ocrService,
+                                       com.municipalidadsanjose.archivo.ocr.OcrPdfService ocrPdf) {
         this.documentoDigitalService = documentoDigitalService;
         this.fileStorageService = fileStorageService;
         this.ocrService = ocrService;
+        this.ocrPdf = ocrPdf;
     }
 
     // Acepta uno o varios archivos en un solo request (flujo de digitalización
@@ -135,6 +138,29 @@ public class DocumentoDigitalController {
     public ResponseEntity<Void> reintentarOcr(@PathVariable UUID id) {
         ocrService.reintentar(id);
         return ResponseEntity.accepted().build();
+    }
+
+    @GetMapping("/{id}/ocr/layout")
+    public com.municipalidadsanjose.archivo.ocr.OcrLayoutDTO layout(@PathVariable UUID id) {
+        return ocrPdf.layout(id);
+    }
+
+    @PutMapping("/{id}/ocr/layout")
+    @PreAuthorize("hasAnyRole('ADMIN','GESTOR_DOCUMENTAL')")
+    public DocumentoDigitalResponseDTO corregir(@PathVariable UUID id,
+            @RequestBody com.municipalidadsanjose.archivo.ocr.OcrLayoutDTO solicitud) {
+        return ocrPdf.corregir(id, solicitud);
+    }
+
+    @GetMapping("/{id}/pdf")
+    public ResponseEntity<Resource> descargarPdf(@PathVariable UUID id) {
+        String ruta = ocrPdf.rutaPdf(id);
+        var metadata = documentoDigitalService.registrarDescarga(id);
+        String nombre = metadata.nombreArchivo().replaceFirst("\\.[^.]+$", "") + "-digitalizado.pdf";
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename(nombre).build().toString())
+                .body(fileStorageService.cargarComoRecurso(ruta));
     }
 
     // Deja constancia en auditoría (accion=DESCARGAR) de quién bajó el archivo,

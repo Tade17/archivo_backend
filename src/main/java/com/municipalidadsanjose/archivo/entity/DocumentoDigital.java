@@ -83,6 +83,15 @@ public class DocumentoDigital {
     @Column(name = "ocr_actualizado_en")
     private LocalDateTime ocrActualizadoEn;
 
+    @Column(name = "ocr_layout", columnDefinition = "TEXT")
+    private String ocrLayout;
+
+    @Column(name = "ruta_pdf", length = 500)
+    private String rutaPdf;
+
+    @Column(name = "ocr_version", nullable = false)
+    private long ocrVersion;
+
     // ocr_tsv NO se mapea: es una columna TSVECTOR que Postgres recalcula solo
     // (trigger trg_documento_ocr_tsv) a partir de ocr_texto. La app nunca la
     // lee ni la escribe directamente; la búsqueda full-text se hace con un
