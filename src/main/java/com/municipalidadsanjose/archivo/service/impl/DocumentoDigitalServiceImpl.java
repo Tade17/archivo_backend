@@ -10,7 +10,6 @@ import com.municipalidadsanjose.archivo.entity.Usuario;
 import com.municipalidadsanjose.archivo.enums.AccionAuditoria;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
 import com.municipalidadsanjose.archivo.mapper.DocumentoDigitalMapper;
-import com.municipalidadsanjose.archivo.enums.EstadoOcr;
 import com.municipalidadsanjose.archivo.ocr.OcrService;
 import com.municipalidadsanjose.archivo.repository.DocumentoDigitalRepository;
 import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
@@ -23,7 +22,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
-import java.time.LocalDateTime;
 
 @Service
 public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
@@ -74,13 +72,6 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         DocumentoDigital documento = documentoDigitalRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", id));
 
-        if (documento.getOcrLayout() != null && !java.util.Objects.equals(documento.getOcrTexto(), dto.ocrTexto())) {
-            throw new com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException("Corrige el texto sobre la página para actualizar también el PDF digitalizado.");
-        }
-        if (documento.getOcrEstado() == EstadoOcr.PENDIENTE || documento.getOcrEstado() == EstadoOcr.PROCESANDO) {
-            throw new com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException("Espera a que termine la digitalización antes de modificar el texto.");
-        }
-
         // El expedienteId no se reasigna en un update: un documento digitalizado
         // pertenece al expediente con el que se creó, no se "muda" de expediente.
         // Tampoco se reasignan rutaAlmacenamiento/tipoMime/hashSha256: quedan
@@ -93,14 +84,6 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         documento.setEscanerUtilizado(dto.escanerUtilizado());
         documento.setResolucionDpi(dto.resolucionDpi());
         documento.setFormatoSalida(dto.formatoSalida());
-        if (!java.util.Objects.equals(documento.getOcrTexto(), dto.ocrTexto())) {
-            documento.setOcrTexto(dto.ocrTexto());
-            documento.setOcrEstado(dto.ocrTexto() == null || dto.ocrTexto().isBlank()
-                    ? EstadoOcr.REQUIERE_REVISION : EstadoOcr.COMPLETADO);
-            documento.setOcrError(null);
-            documento.setOcrRevisado(true);
-            documento.setOcrActualizadoEn(LocalDateTime.now());
-        }
 
         // idem que en crear(): sin flush, fechaActualizacion en la respuesta
         // muestra el valor viejo en vez del que Hibernate acaba de generar.

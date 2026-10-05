@@ -55,7 +55,11 @@ def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Im
     if is_pdf:
         pages = []
         pixels = 0
-        with pdfium.PdfDocument(data) as document:
+        # pypdfium2 4.30 no implementa el protocolo de context manager en
+        # PdfDocument (falla con "does not support the context manager
+        # protocol" si se usa "with"); se libera a mano con close().
+        document = pdfium.PdfDocument(data)
+        try:
             if len(document) > MAX_PAGES:
                 raise ValueError(f"El PDF supera el máximo de {MAX_PAGES} páginas")
             scale = PDF_DPI / 72
@@ -73,6 +77,8 @@ def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Im
                         bitmap.close()
                 finally:
                     page.close()
+        finally:
+            document.close()
         return pages
 
     with Image.open(io.BytesIO(data)) as image:

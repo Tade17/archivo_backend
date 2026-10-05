@@ -114,8 +114,7 @@ public class DocumentoDigitalController {
                 principal.getId(),
                 dto.escanerUtilizado(),
                 dto.resolucionDpi(),
-                dto.formatoSalida(),
-                dto.ocrTexto());
+                dto.formatoSalida());
         return ResponseEntity.ok(documentoDigitalService.actualizar(id, datosSeguros));
     }
 
@@ -140,17 +139,10 @@ public class DocumentoDigitalController {
         return ResponseEntity.accepted().build();
     }
 
-    @GetMapping("/{id}/ocr/layout")
-    public com.municipalidadsanjose.archivo.ocr.OcrLayoutDTO layout(@PathVariable UUID id) {
-        return ocrPdf.layout(id);
-    }
-
-    @PutMapping("/{id}/ocr/layout")
-    @PreAuthorize("hasAnyRole('ADMIN','GESTOR_DOCUMENTAL')")
-    public DocumentoDigitalResponseDTO corregir(@PathVariable UUID id,
-            @RequestBody com.municipalidadsanjose.archivo.ocr.OcrLayoutDTO solicitud) {
-        return ocrPdf.corregir(id, solicitud);
-    }
+    // No hay endpoint para editar el texto reconocido ni su posición en la
+    // página: el archivo histórico debe quedar tal como lo generó el OCR, sin
+    // edición humana (ver OCR.md). Solo se expone la lectura del PDF ya
+    // generado (descargarPdf) y el reintento automático (reintentarOcr).
 
     @GetMapping("/{id}/pdf")
     public ResponseEntity<Resource> descargarPdf(@PathVariable UUID id) {

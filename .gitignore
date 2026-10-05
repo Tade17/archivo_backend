@@ -38,3 +38,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Variables locales de Docker Compose (p. ej. OCR_HOST_PORT si el 8091 choca) ###
+.env
+
+### Config local que Spring Boot carga con prioridad desde ./config/ ###
+/config/
