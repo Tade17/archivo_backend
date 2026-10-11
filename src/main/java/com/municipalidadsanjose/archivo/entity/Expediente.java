@@ -36,6 +36,10 @@ public class Expediente {
     @Column(nullable = false, length = 255)
     private String remitente;
 
+    // Opcional: no todos los documentos tienen un destinatario escrito.
+    @Column(length = 255)
+    private String destinatario;
+
     // Área a la que va dirigido el documento.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "area_destino_id", nullable = false)
@@ -61,9 +65,11 @@ public class Expediente {
     @Column(columnDefinition = "TEXT")
     private String glosa;
 
+    // Archivador o folder físico que lo contiene; su ubicación (Sección/Nivel/
+    // Área) se obtiene a través del contenedor.
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "caja_id")
-    private Caja caja;
+    @JoinColumn(name = "contenedor_id", nullable = false)
+    private Contenedor contenedor;
 
     @Column(name = "numero_folios")
     private Integer numeroFolios;

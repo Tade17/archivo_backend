@@ -1,6 +1,6 @@
 # Datos de prueba (seed-demo)
 
-Carga una municipalidad de ejemplo en el sistema para probar el flujo completo: 4 usuarios, 4 áreas (Alcaldía, Gerencia Municipal, Secretaría General, Trámite Documentario) y 4 tipos documentales (Oficio, Solicitud, Carta, Informe) y **30 expedientes con 59 documentos PDF** (informes, resoluciones, contratos, actas, licencias…). Incluye 2 escaneos simulados sin texto, útiles para probar el OCR.
+Carga una municipalidad de ejemplo en el sistema para probar el flujo completo: 4 usuarios, 4 áreas (Alcaldía, Gerencia Municipal, Secretaría General, Trámite Documentario) y 4 tipos documentales (Oficio, Solicitud, Carta, Informe) y **30 expedientes con 59 documentos PDF** (informes, resoluciones, contratos, actas, licencias…). Incluye 2 escaneos simulados sin texto, útiles para probar el OCR. Además crea la ubicación física (2 secciones × 3 niveles × 2 áreas) y un archivador por oficina de origen; los archivadores quedan completados salvo dos, que se dejan pendientes para mostrar cómo se retoma uno a medio digitalizar.
 
 Todos los nombres, DNI, RUC, placas y montos son ficticios.
 
@@ -15,7 +15,7 @@ node seed-demo.mjs
 
 Requiere Node 18 o superior y que el contenedor de Postgres se llame `archivo-postgres` (el de `docker-compose.yml`). Si el backend no está en `http://localhost:8080/api`, definir `API_URL`.
 
-Es seguro repetirlo: lo que ya existe (áreas, tipos, usuarios, expedientes) se omite, no se duplica.
+Es seguro repetirlo: lo que ya existe (áreas, tipos, usuarios, ubicaciones, archivadores, expedientes) se omite, no se duplica.
 
 ## Usuarios creados
 

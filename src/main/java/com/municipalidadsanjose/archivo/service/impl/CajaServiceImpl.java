@@ -11,7 +11,7 @@ import com.municipalidadsanjose.archivo.exception.RecursoEnUsoException;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
 import com.municipalidadsanjose.archivo.mapper.CajaMapper;
 import com.municipalidadsanjose.archivo.repository.CajaRepository;
-import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
+import com.municipalidadsanjose.archivo.repository.ContenedorRepository;
 import com.municipalidadsanjose.archivo.repository.NivelRepository;
 import com.municipalidadsanjose.archivo.service.CajaService;
 import org.springframework.stereotype.Service;
@@ -25,16 +25,16 @@ public class CajaServiceImpl implements CajaService {
 
     private final CajaRepository cajaRepository;
     private final NivelRepository nivelRepository;
-    private final ExpedienteRepository expedienteRepository;
+    private final ContenedorRepository contenedorRepository;
     private final CajaMapper cajaMapper;
 
     public CajaServiceImpl(CajaRepository cajaRepository,
                             NivelRepository nivelRepository,
-                            ExpedienteRepository expedienteRepository,
+                            ContenedorRepository contenedorRepository,
                             CajaMapper cajaMapper) {
         this.cajaRepository = cajaRepository;
         this.nivelRepository = nivelRepository;
-        this.expedienteRepository = expedienteRepository;
+        this.contenedorRepository = contenedorRepository;
         this.cajaMapper = cajaMapper;
     }
 
@@ -46,7 +46,7 @@ public class CajaServiceImpl implements CajaService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Nivel", dto.nivelId()));
 
         if (cajaRepository.existsByNivelIdAndCodigo(dto.nivelId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe una caja con el código '" + dto.codigo() + "' en ese nivel");
+            throw new RecursoDuplicadoException("Ya existe un área con el código '" + dto.codigo() + "' en ese nivel");
         }
 
         Caja guardada = cajaRepository.save(cajaMapper.toEntity(dto, nivel));
@@ -66,7 +66,7 @@ public class CajaServiceImpl implements CajaService {
         boolean cambia = !caja.getNivel().getId().equals(dto.nivelId())
                 || !caja.getCodigo().equals(dto.codigo());
         if (cambia && cajaRepository.existsByNivelIdAndCodigo(dto.nivelId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe una caja con el código '" + dto.codigo() + "' en ese nivel");
+            throw new RecursoDuplicadoException("Ya existe un área con el código '" + dto.codigo() + "' en ese nivel");
         }
 
         caja.setNivel(nivel);
@@ -105,8 +105,8 @@ public class CajaServiceImpl implements CajaService {
         if (!cajaRepository.existsById(id)) {
             throw new RecursoNoEncontradoException("Caja", id);
         }
-        if (expedienteRepository.existsByCajaId(id)) {
-            throw new RecursoEnUsoException("No se puede eliminar la caja: tiene expedientes archivados");
+        if (contenedorRepository.existsByCajaId(id)) {
+            throw new RecursoEnUsoException("No se puede eliminar el área: tiene archivadores o folders registrados");
         }
         cajaRepository.deleteById(id);
     }

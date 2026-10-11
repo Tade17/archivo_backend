@@ -34,13 +34,17 @@ public class WorkspaceController {
   private static final String JOINS = """
     FROM expediente e JOIN area_responsable a ON a.area_id=e.area_destino_id
     JOIN tipo_documental t ON t.tipo_id=e.tipo_id JOIN estado_expediente es ON es.estado_id=e.estado_id
+    JOIN contenedor k ON k.contenedor_id=e.contenedor_id JOIN caja cj ON cj.caja_id=k.caja_id
+    JOIN nivel nv ON nv.nivel_id=cj.nivel_id JOIN estante st ON st.estante_id=nv.estante_id
     """;
   private static final String COLUMNS = """
     e.expediente_id AS id, e.codigo_unico AS "codigoUnico",e.numero_documento AS "numeroDocumento",
     e.numero_tramite AS "numeroTramite",e.anio_ingreso AS "anioIngreso",e.remitente,e.asunto,e.glosa,
     e.area_destino_id AS "areaDestinoId",a.nombre AS "areaDestinoNombre",e.tipo_id AS "tipoId",t.nombre AS "tipoNombre",
     e.estado_id AS "estadoId",es.nombre AS "estadoNombre",e.fecha_documento AS "fechaDocumento",
-    e.fecha_registro AS "fechaRegistro",
+    e.fecha_registro AS "fechaRegistro",e.destinatario,e.numero_folios AS "numeroFolios",
+    k.contenedor_id AS "contenedorId",k.tipo_contenedor AS "contenedorTipo",k.descripcion AS "contenedorDescripcion",
+    k.estado_digitalizacion AS "contenedorEstado",st.codigo AS seccion,nv.codigo AS nivel,cj.codigo AS area,
     (SELECT d.documento_id FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoId",
     (SELECT d.nombre_archivo FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoNombre",
     (SELECT count(*) FROM documento_digital d WHERE d.expediente_id=e.expediente_id) AS "totalDocumentos"
@@ -60,12 +64,12 @@ public class WorkspaceController {
     var where=new StringBuilder(JOINS+" WHERE true");var args=new ArrayList<Object>();
     String text=q.getOrDefault("texto","").trim();
     if(!text.isEmpty()){
-      where.append(" AND (unaccent(concat_ws(' ',e.codigo_unico,e.numero_documento,e.remitente,e.asunto,e.glosa)) ILIKE unaccent(?) OR EXISTS(SELECT 1 FROM documento_digital d WHERE d.expediente_id=e.expediente_id AND d.ocr_tsv @@ websearch_to_tsquery('spanish',?)))");
+      where.append(" AND (unaccent(concat_ws(' ',e.codigo_unico,e.numero_documento,e.remitente,e.destinatario,e.asunto,e.glosa,k.descripcion)) ILIKE unaccent(?) OR EXISTS(SELECT 1 FROM documento_digital d WHERE d.expediente_id=e.expediente_id AND d.ocr_tsv @@ websearch_to_tsquery('spanish',?)))");
       args.add("%"+text+"%");args.add(text);
     }
     equal(where,args,q,"codigo","e.codigo_unico");
     equal(where,args,q,"areaDestinoId","e.area_destino_id::text");equal(where,args,q,"tipoId","e.tipo_id::text");
-    equal(where,args,q,"cajaId","e.caja_id::text");equal(where,args,q,"anio","extract(year from e.fecha_documento)::text");
+    equal(where,args,q,"contenedorId","e.contenedor_id::text");equal(where,args,q,"areaId","k.caja_id::text");equal(where,args,q,"anio","extract(year from e.fecha_documento)::text");
     for(String key:List.of("desde","hasta"))if(q.containsKey(key)&&!q.get(key).isBlank()){
       where.append(" AND e.fecha_registro::date ").append(key.equals("desde")?">=":"<=").append(" ?::date");args.add(q.get(key));
     }
@@ -85,8 +89,10 @@ public class WorkspaceController {
       "roles",db.queryForList("SELECT rol_id AS id,nombre FROM rol ORDER BY nombre"));
   }
   public record Reception(@NotBlank @Size(max=50) String numeroDocumento,@NotBlank @Size(max=255) String remitente,
-    @NotNull UUID areaDestinoId,@NotNull UUID tipoId,@NotNull LocalDate fechaDocumento,
-    @NotBlank @Size(max=500) String asunto,String glosa) {}
+    @Size(max=255) String destinatario,@NotNull UUID areaDestinoId,@NotNull UUID tipoId,@NotNull LocalDate fechaDocumento,
+    @NotBlank @Size(max=500) String asunto,String glosa,@Positive Integer numeroFolios,
+    @NotNull(message="Elige el archivador o folder donde está el documento") UUID contenedorId) {}
+  private static String vacioANull(String valor){return valor==null||valor.isBlank()?null:valor.trim();}
   @PostMapping("/recepcion")
   @PreAuthorize("hasAnyRole('ADMIN','GESTOR_DOCUMENTAL')")
   @Transactional
@@ -101,7 +107,7 @@ public class WorkspaceController {
     String sufijo=String.format("%06d",correlativo);
     String numeroTramite="TRM-"+anio+"-"+sufijo;
     String code="EXP-"+anio+"-"+sufijo;
-    var result=expedientes.crear(new ExpedienteRequestDTO(code,r.numeroDocumento(),r.remitente(),r.areaDestinoId(),r.tipoId(),state,r.fechaDocumento(),r.asunto(),r.glosa(),null,null,user.getId(),Set.of()));
+    var result=expedientes.crear(new ExpedienteRequestDTO(code,r.numeroDocumento(),r.remitente(),r.areaDestinoId(),r.tipoId(),state,r.fechaDocumento(),r.asunto(),r.glosa(),vacioANull(r.destinatario()),r.contenedorId(),r.numeroFolios(),user.getId(),Set.of()));
     db.update("UPDATE expediente SET numero_tramite=?,anio_ingreso=? WHERE expediente_id=?",numeroTramite,anio,result.id());
     return result;
   }
@@ -110,9 +116,16 @@ public class WorkspaceController {
   @Transactional
   public Map<String,Object> edit(@PathVariable UUID id,@Valid @RequestBody Reception r,@AuthenticationPrincipal UsuarioPrincipal user){
     var original=detail(id);
+    // Mover el documento a otro contenedor sigue la misma regla que registrarlo:
+    // un contenedor completado hay que reabrirlo antes de agregarle documentos.
+    if(!r.contenedorId().equals(original.get("contenedorId"))){
+      var estado=db.queryForList("SELECT estado_digitalizacion FROM contenedor WHERE contenedor_id=?",String.class,r.contenedorId());
+      if(estado.isEmpty())throw new RecursoNoEncontradoException("Contenedor",r.contenedorId());
+      if("COMPLETADO".equals(estado.get(0)))throw new SolicitudInvalidaException("El contenedor está marcado como completado. Reábrelo para agregar documentos.");
+    }
     db.update("""
-      UPDATE expediente SET numero_documento=?,remitente=?,area_destino_id=?,tipo_id=?,fecha_documento=?,asunto=?,glosa=?,fecha_actualizacion=now() WHERE expediente_id=?
-      """,r.numeroDocumento(),r.remitente(),r.areaDestinoId(),r.tipoId(),r.fechaDocumento(),r.asunto(),r.glosa(),id);
+      UPDATE expediente SET numero_documento=?,remitente=?,destinatario=?,area_destino_id=?,tipo_id=?,fecha_documento=?,asunto=?,glosa=?,numero_folios=?,contenedor_id=?,fecha_actualizacion=now() WHERE expediente_id=?
+      """,r.numeroDocumento(),r.remitente(),vacioANull(r.destinatario()),r.areaDestinoId(),r.tipoId(),r.fechaDocumento(),r.asunto(),r.glosa(),r.numeroFolios(),r.contenedorId(),id);
     audit(user.getId(),"Expediente",id,"MODIFICAR");
     return detail(id);
   }

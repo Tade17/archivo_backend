@@ -34,7 +34,10 @@ public record ExpedienteRequestDTO(
 
         String glosa,
 
-        UUID cajaId,
+        String destinatario,
+
+        @NotNull(message = "El contenedor es obligatorio")
+        UUID contenedorId,
 
         Integer numeroFolios,
 

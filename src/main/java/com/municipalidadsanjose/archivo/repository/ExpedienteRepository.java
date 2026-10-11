@@ -12,6 +12,6 @@ public interface ExpedienteRepository extends JpaRepository<Expediente, UUID> {
     boolean existsByAreaDestinoId(UUID areaDestinoId);
     boolean existsByTipoId(UUID tipoId);
     boolean existsByEstadoId(UUID estadoId);
-    boolean existsByCajaId(UUID cajaId);
+    boolean existsByContenedorId(UUID contenedorId);
     boolean existsByTagsId(UUID tagId);
 }

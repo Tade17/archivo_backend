@@ -46,7 +46,7 @@ public class NivelServiceImpl implements NivelService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("Estante", dto.estanteId()));
 
         if (nivelRepository.existsByEstanteIdAndCodigo(dto.estanteId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe un nivel con el código '" + dto.codigo() + "' en ese estante");
+            throw new RecursoDuplicadoException("Ya existe un nivel con el código '" + dto.codigo() + "' en esa sección");
         }
 
         Nivel guardado = nivelRepository.save(nivelMapper.toEntity(dto, estante));
@@ -66,7 +66,7 @@ public class NivelServiceImpl implements NivelService {
         boolean cambia = !nivel.getEstante().getId().equals(dto.estanteId())
                 || !nivel.getCodigo().equals(dto.codigo());
         if (cambia && nivelRepository.existsByEstanteIdAndCodigo(dto.estanteId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe un nivel con el código '" + dto.codigo() + "' en ese estante");
+            throw new RecursoDuplicadoException("Ya existe un nivel con el código '" + dto.codigo() + "' en esa sección");
         }
 
         nivel.setEstante(estante);
@@ -106,7 +106,7 @@ public class NivelServiceImpl implements NivelService {
             throw new RecursoNoEncontradoException("Nivel", id);
         }
         if (cajaRepository.existsByNivelId(id)) {
-            throw new RecursoEnUsoException("No se puede eliminar el nivel: tiene cajas registradas");
+            throw new RecursoEnUsoException("No se puede eliminar el nivel: tiene áreas registradas");
         }
         nivelRepository.deleteById(id);
     }

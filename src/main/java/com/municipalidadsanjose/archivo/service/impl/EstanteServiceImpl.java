@@ -46,7 +46,7 @@ public class EstanteServiceImpl implements EstanteService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("ArchivoCentral", dto.archivoCentralId()));
 
         if (estanteRepository.existsByArchivoCentralIdAndCodigo(dto.archivoCentralId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe un estante con el código '" + dto.codigo() + "' en ese archivo central");
+            throw new RecursoDuplicadoException("Ya existe una sección con el código '" + dto.codigo() + "'");
         }
 
         Estante guardado = estanteRepository.save(estanteMapper.toEntity(dto, archivoCentral));
@@ -66,7 +66,7 @@ public class EstanteServiceImpl implements EstanteService {
         boolean cambia = !estante.getArchivoCentral().getId().equals(dto.archivoCentralId())
                 || !estante.getCodigo().equals(dto.codigo());
         if (cambia && estanteRepository.existsByArchivoCentralIdAndCodigo(dto.archivoCentralId(), dto.codigo())) {
-            throw new RecursoDuplicadoException("Ya existe un estante con el código '" + dto.codigo() + "' en ese archivo central");
+            throw new RecursoDuplicadoException("Ya existe una sección con el código '" + dto.codigo() + "'");
         }
 
         estante.setArchivoCentral(archivoCentral);
@@ -106,7 +106,7 @@ public class EstanteServiceImpl implements EstanteService {
             throw new RecursoNoEncontradoException("Estante", id);
         }
         if (nivelRepository.existsByEstanteId(id)) {
-            throw new RecursoEnUsoException("No se puede eliminar el estante: tiene niveles registrados");
+            throw new RecursoEnUsoException("No se puede eliminar la sección: tiene niveles registrados");
         }
         estanteRepository.deleteById(id);
     }

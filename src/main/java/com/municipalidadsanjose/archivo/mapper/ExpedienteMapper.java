@@ -15,7 +15,7 @@ public class ExpedienteMapper {
                                 AreaResponsable areaDestino,
                                 TipoDocumental tipo,
                                 EstadoExpediente estado,
-                                Caja caja,
+                                Contenedor contenedor,
                                 Usuario creadoPor) {
         Expediente expediente = new Expediente();
         expediente.setCodigoUnico(dto.codigoUnico());
@@ -27,7 +27,8 @@ public class ExpedienteMapper {
         expediente.setFechaDocumento(dto.fechaDocumento());
         expediente.setAsunto(dto.asunto());
         expediente.setGlosa(dto.glosa());
-        expediente.setCaja(caja);
+        expediente.setDestinatario(dto.destinatario());
+        expediente.setContenedor(contenedor);
         expediente.setNumeroFolios(dto.numeroFolios());
         expediente.setCreadoPor(creadoPor);
         return expediente;
@@ -49,8 +50,9 @@ public class ExpedienteMapper {
                 expediente.getFechaDocumento(),
                 expediente.getAsunto(),
                 expediente.getGlosa(),
-                expediente.getCaja() == null ? null : expediente.getCaja().getId(),
-                expediente.getCaja() == null ? null : expediente.getCaja().getCodigo(),
+                expediente.getDestinatario(),
+                expediente.getContenedor().getId(),
+                expediente.getContenedor().getDescripcion(),
                 expediente.getNumeroFolios(),
                 expediente.getCreadoPor().getNombre(),
                 expediente.getFechaRegistro(),

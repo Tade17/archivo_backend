@@ -41,6 +41,7 @@ public abstract class IntegrationTestBase {
     @Autowired protected EstanteRepository estanteRepository;
     @Autowired protected NivelRepository nivelRepository;
     @Autowired protected CajaRepository cajaRepository;
+    @Autowired protected ContenedorRepository contenedorRepository;
     @Autowired protected PasswordEncoder passwordEncoder;
 
     private String sufijoUnico() {
@@ -111,6 +112,16 @@ public abstract class IntegrationTestBase {
         return cajaRepository.save(caja);
     }
 
+    // Archivador PENDIENTE dentro de una ubicación nueva: lo mínimo para registrar documentos.
+    protected Contenedor crearContenedor(Usuario creador) {
+        Contenedor contenedor = new Contenedor();
+        contenedor.setCaja(crearCajaConJerarquia());
+        contenedor.setTipo(com.municipalidadsanjose.archivo.enums.TipoContenedor.ARCHIVADOR);
+        contenedor.setDescripcion("Archivador de prueba");
+        contenedor.setCreadoPor(creador);
+        return contenedorRepository.save(contenedor);
+    }
+
     protected AreaResponsable crearArea() {
         AreaResponsable area = new AreaResponsable();
         area.setNombre("Area_" + sufijoUnico());
@@ -130,7 +141,7 @@ public abstract class IntegrationTestBase {
         return estadoExpedienteRepository.save(estado);
     }
 
-    protected String expedienteRequestJson(UUID areaId, UUID tipoId, UUID estadoId, UUID cajaId, UUID creadoPorId) {
+    protected String expedienteRequestJson(UUID areaId, UUID tipoId, UUID estadoId, UUID contenedorId, UUID creadoPorId) {
         return """
                 {
                   "codigoUnico": "EXP-%s",
@@ -142,12 +153,12 @@ public abstract class IntegrationTestBase {
                   "fechaDocumento": "%s",
                   "asunto": "Asunto de prueba",
                   "glosa": "glosa",
-                  "cajaId": "%s",
+                  "contenedorId": "%s",
                   "numeroFolios": 3,
                   "creadoPorId": "%s"
                 }
                 """.formatted(sufijoUnico(), sufijoUnico(), areaId, tipoId, estadoId,
-                LocalDate.now(), cajaId, creadoPorId);
+                LocalDate.now(), contenedorId, creadoPorId);
     }
 
     protected String login(String correo, String password) throws Exception {

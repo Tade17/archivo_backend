@@ -5,8 +5,10 @@ import com.municipalidadsanjose.archivo.dto.expediente.ExpedienteRequestDTO;
 import com.municipalidadsanjose.archivo.dto.expediente.ExpedienteResponseDTO;
 import com.municipalidadsanjose.archivo.entity.*;
 import com.municipalidadsanjose.archivo.enums.AccionAuditoria;
+import com.municipalidadsanjose.archivo.enums.EstadoDigitalizacion;
 import com.municipalidadsanjose.archivo.exception.RecursoDuplicadoException;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
+import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.mapper.ExpedienteMapper;
 import com.municipalidadsanjose.archivo.repository.*;
 import com.municipalidadsanjose.archivo.service.ExpedienteService;
@@ -26,7 +28,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
     private final AreaResponsableRepository areaResponsableRepository;
     private final TipoDocumentalRepository tipoDocumentalRepository;
     private final EstadoExpedienteRepository estadoExpedienteRepository;
-    private final CajaRepository cajaRepository;
+    private final ContenedorRepository contenedorRepository;
     private final UsuarioRepository usuarioRepository;
     private final TagRepository tagRepository;
     private final ExpedienteMapper expedienteMapper;
@@ -35,7 +37,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                                   AreaResponsableRepository areaResponsableRepository,
                                   TipoDocumentalRepository tipoDocumentalRepository,
                                   EstadoExpedienteRepository estadoExpedienteRepository,
-                                  CajaRepository cajaRepository,
+                                  ContenedorRepository contenedorRepository,
                                   UsuarioRepository usuarioRepository,
                                   TagRepository tagRepository,
                                   ExpedienteMapper expedienteMapper) {
@@ -43,10 +45,22 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         this.areaResponsableRepository = areaResponsableRepository;
         this.tipoDocumentalRepository = tipoDocumentalRepository;
         this.estadoExpedienteRepository = estadoExpedienteRepository;
-        this.cajaRepository = cajaRepository;
+        this.contenedorRepository = contenedorRepository;
         this.usuarioRepository = usuarioRepository;
         this.tagRepository = tagRepository;
         this.expedienteMapper = expedienteMapper;
+    }
+
+    // Un contenedor COMPLETADO ya tiene todos sus documentos: para agregar uno
+    // faltante primero hay que reabrirlo (queda en auditoría quién lo hizo).
+    private Contenedor contenedorAbierto(UUID contenedorId) {
+        Contenedor contenedor = contenedorRepository.findById(contenedorId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Contenedor", contenedorId));
+        if (contenedor.getEstado() == EstadoDigitalizacion.COMPLETADO) {
+            throw new SolicitudInvalidaException(
+                    "El contenedor está marcado como completado. Reábrelo para agregar documentos.");
+        }
+        return contenedor;
     }
 
     private Set<Tag> resolverTags(Set<UUID> tagIds) {
@@ -75,12 +89,11 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("TipoDocumental", dto.tipoId()));
         EstadoExpediente estado = estadoExpedienteRepository.findById(dto.estadoId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("EstadoExpediente", dto.estadoId()));
-        Caja caja = dto.cajaId() == null ? null : cajaRepository.findById(dto.cajaId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Caja", dto.cajaId()));
+        Contenedor contenedor = contenedorAbierto(dto.contenedorId());
         Usuario creadoPor = usuarioRepository.findById(dto.creadoPorId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.creadoPorId()));
 
-        Expediente expediente = expedienteMapper.toEntity(dto, areaDestino, tipo, estado, caja, creadoPor);
+        Expediente expediente = expedienteMapper.toEntity(dto, areaDestino, tipo, estado, contenedor, creadoPor);
         expediente.getTags().addAll(resolverTags(dto.tagIds()));
 
         // flush explícito: sin esto, fechaRegistro/fechaActualizacion (generadas por
@@ -108,8 +121,9 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                 .orElseThrow(() -> new RecursoNoEncontradoException("TipoDocumental", dto.tipoId()));
         EstadoExpediente estado = estadoExpedienteRepository.findById(dto.estadoId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("EstadoExpediente", dto.estadoId()));
-        Caja caja = dto.cajaId() == null ? null : cajaRepository.findById(dto.cajaId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Caja", dto.cajaId()));
+        Contenedor contenedor = expediente.getContenedor().getId().equals(dto.contenedorId())
+                ? expediente.getContenedor()
+                : contenedorAbierto(dto.contenedorId());
         Usuario creadoPor = usuarioRepository.findById(dto.creadoPorId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.creadoPorId()));
 
@@ -122,7 +136,8 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         expediente.setFechaDocumento(dto.fechaDocumento());
         expediente.setAsunto(dto.asunto());
         expediente.setGlosa(dto.glosa());
-        expediente.setCaja(caja);
+        expediente.setDestinatario(dto.destinatario());
+        expediente.setContenedor(contenedor);
         expediente.setNumeroFolios(dto.numeroFolios());
         expediente.setCreadoPor(creadoPor);
 

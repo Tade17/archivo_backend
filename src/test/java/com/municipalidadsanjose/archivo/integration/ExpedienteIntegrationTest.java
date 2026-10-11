@@ -1,6 +1,6 @@
 package com.municipalidadsanjose.archivo.integration;
 
-import com.municipalidadsanjose.archivo.entity.Caja;
+import com.municipalidadsanjose.archivo.entity.Contenedor;
 import com.municipalidadsanjose.archivo.entity.Rol;
 import com.municipalidadsanjose.archivo.entity.Usuario;
 import org.junit.jupiter.api.Test;
@@ -36,9 +36,10 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
                   "tipoId":"%s",
                   "fechaDocumento":"%s",
                   "asunto":"Documento digital de prueba",
-                  "glosa":""
+                  "glosa":"",
+                  "contenedorId":"%s"
                 }
-                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now());
+                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now(), crearContenedor(usuario).getId());
 
         mockMvc.perform(post("/api/workspace/recepcion")
                         .header("Authorization", "Bearer " + token)
@@ -62,9 +63,10 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
                   "tipoId":"%s",
                   "fechaDocumento":"%s",
                   "asunto":"Inspección del CAMIÓN zorzalito",
-                  "glosa":""
+                  "glosa":"",
+                  "contenedorId":"%s"
                 }
-                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now());
+                """.formatted(area.getId(), tipo.getId(), java.time.LocalDate.now(), crearContenedor(usuario).getId());
         mockMvc.perform(post("/api/workspace/recepcion")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -88,14 +90,14 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
     }
 
     private String crearExpedienteYObtenerRespuesta() throws Exception {
-        Caja caja = crearCajaConJerarquia();
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
         Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
+        Contenedor contenedor = crearContenedor(usuario);
 
-        String body = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());
+        String body = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), contenedor.getId(), usuario.getId());
 
         return mockMvc.perform(post("/api/expedientes")
                         .header("Authorization", "Bearer " + token)
@@ -116,14 +118,14 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
 
     @Test
     void actualizar_devuelveFechaActualizacionRenovada() throws Exception {
-        Caja caja = crearCajaConJerarquia();
         var area = crearArea();
         var tipo = crearTipoDocumental();
         var estado = crearEstadoExpediente();
         Usuario usuario = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
         String token = login(usuario.getCorreo(), "Password123!");
+        Contenedor contenedor = crearContenedor(usuario);
 
-        String bodyCrear = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId());
+        String bodyCrear = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), contenedor.getId(), usuario.getId());
         String respuestaCrear = mockMvc.perform(post("/api/expedientes")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -135,7 +137,7 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
         String fechaActualizacionOriginal = com.jayway.jsonpath.JsonPath.read(respuestaCrear, "$.fechaActualizacion");
 
         // Cambia el asunto para forzar un UPDATE real.
-        String bodyActualizar = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), caja.getId(), usuario.getId())
+        String bodyActualizar = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), contenedor.getId(), usuario.getId())
                 .replace("\"asunto\": \"Asunto de prueba\"", "\"asunto\": \"Asunto editado\"");
         // El código único debe mantenerse igual al original para no chocar con existsByCodigoUnico.
         String codigoOriginal = com.jayway.jsonpath.JsonPath.read(respuestaCrear, "$.codigoUnico");
