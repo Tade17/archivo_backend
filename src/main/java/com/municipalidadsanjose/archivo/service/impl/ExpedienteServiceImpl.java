@@ -12,6 +12,7 @@ import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.mapper.ExpedienteMapper;
 import com.municipalidadsanjose.archivo.repository.*;
 import com.municipalidadsanjose.archivo.service.ExpedienteService;
+import com.municipalidadsanjose.archivo.storage.FileStorageService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,9 @@ public class ExpedienteServiceImpl implements ExpedienteService {
     private final UsuarioRepository usuarioRepository;
     private final TagRepository tagRepository;
     private final ExpedienteMapper expedienteMapper;
+    private final DocumentoDigitalRepository documentoDigitalRepository;
+    private final PrestamoRepository prestamoRepository;
+    private final FileStorageService fileStorageService;
 
     public ExpedienteServiceImpl(ExpedienteRepository expedienteRepository,
                                   AreaResponsableRepository areaResponsableRepository,
@@ -40,7 +44,10 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                                   ContenedorRepository contenedorRepository,
                                   UsuarioRepository usuarioRepository,
                                   TagRepository tagRepository,
-                                  ExpedienteMapper expedienteMapper) {
+                                  ExpedienteMapper expedienteMapper,
+                                  DocumentoDigitalRepository documentoDigitalRepository,
+                                  PrestamoRepository prestamoRepository,
+                                  FileStorageService fileStorageService) {
         this.expedienteRepository = expedienteRepository;
         this.areaResponsableRepository = areaResponsableRepository;
         this.tipoDocumentalRepository = tipoDocumentalRepository;
@@ -49,6 +56,9 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         this.usuarioRepository = usuarioRepository;
         this.tagRepository = tagRepository;
         this.expedienteMapper = expedienteMapper;
+        this.documentoDigitalRepository = documentoDigitalRepository;
+        this.prestamoRepository = prestamoRepository;
+        this.fileStorageService = fileStorageService;
     }
 
     // Un contenedor COMPLETADO ya tiene todos sus documentos: para agregar uno
@@ -150,6 +160,27 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         // muestra el valor viejo en vez del que Hibernate acaba de generar.
         expedienteRepository.flush();
         return expedienteMapper.toResponseDTO(expediente);
+    }
+
+    @Override
+    @Transactional
+    @Auditable(entidad = "Expediente", accion = AccionAuditoria.ELIMINAR)
+    public void eliminar(UUID id) {
+        Expediente expediente = expedienteRepository.findById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Expediente", id));
+        if (prestamoRepository.existsByExpedienteId(id)) {
+            throw new SolicitudInvalidaException("No se puede eliminar: el expediente tiene préstamos registrados.");
+        }
+        java.util.List<DocumentoDigital> documentos = documentoDigitalRepository.findByExpedienteId(id);
+        documentoDigitalRepository.deleteAll(documentos);
+        expedienteRepository.delete(expediente);
+        expedienteRepository.flush();
+        // Los archivos físicos se borran al final: si la transacción fallara
+        // antes, no queda una fila apuntando a un archivo que ya no existe.
+        for (DocumentoDigital d : documentos) {
+            fileStorageService.eliminar(d.getRutaAlmacenamiento());
+            if (d.getRutaPdf() != null) fileStorageService.eliminar(d.getRutaPdf());
+        }
     }
 
     @Override

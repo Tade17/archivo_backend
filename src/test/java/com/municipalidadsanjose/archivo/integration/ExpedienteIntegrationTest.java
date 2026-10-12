@@ -164,4 +164,38 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.tamano").value(5))
                 .andExpect(jsonPath("$.contenido").isArray());
     }
+
+    @Test
+    void eliminar_soloAdministradorYQuedaEnAuditoria() throws Exception {
+        Usuario admin = crearUsuario(obtenerRolAdmin(), "Password123!", true);
+        Usuario gestor = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
+        String tokenAdmin = login(admin.getCorreo(), "Password123!");
+        String tokenGestor = login(gestor.getCorreo(), "Password123!");
+        String json = expedienteRequestJson(crearArea().getId(), crearTipoDocumental().getId(),
+                crearEstadoExpediente().getId(), crearContenedor(gestor).getId(), gestor.getId());
+        String creado = mockMvc.perform(post("/api/expedientes")
+                        .header("Authorization", "Bearer " + tokenGestor)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String id = com.jayway.jsonpath.JsonPath.read(creado, "$.id");
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/expedientes/" + id)
+                        .header("Authorization", "Bearer " + tokenGestor))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/expedientes/" + id)
+                        .header("Authorization", "Bearer " + tokenAdmin))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/expedientes/" + id)
+                        .header("Authorization", "Bearer " + tokenAdmin))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/auditoria")
+                        .param("entidad", "Expediente")
+                        .param("accion", "ELIMINAR")
+                        .header("Authorization", "Bearer " + tokenAdmin))
+                .andExpect(status().isOk());
+    }
 }

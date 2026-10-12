@@ -7,11 +7,12 @@ import org.springframework.data.domain.Pageable;
 
 import java.util.UUID;
 
-// Sin eliminar(): el expediente es el registro del documento archivado,
-// nunca se borra de verdad. Su ciclo de vida se maneja con EstadoExpediente.
+// eliminar() es solo para corregir registros hechos por error: lo ejecuta el
+// administrador y queda en auditoría.
 public interface ExpedienteService {
     ExpedienteResponseDTO crear(ExpedienteRequestDTO dto);
     ExpedienteResponseDTO actualizar(UUID id, ExpedienteRequestDTO dto);
+    void eliminar(UUID id);
     ExpedienteResponseDTO buscarPorId(UUID id);
     ExpedienteResponseDTO buscarPorCodigoUnico(String codigoUnico);
     Page<ExpedienteResponseDTO> listarTodos(Pageable pageable);

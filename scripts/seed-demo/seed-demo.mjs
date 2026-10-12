@@ -127,12 +127,12 @@ for (const e of EXPEDIENTES) {
   console.log(`  ${exp.codigoUnico}  ${e.numeroDocumento}  (${e.docs.length} doc.)  ${e.asunto.slice(0, 60)}`);
 }
 
-// ── Estado y fechas realistas (la API siempre crea "Registrado" y "hoy") ──────────
+// ── Fechas realistas (la API siempre crea el documento con la fecha de "hoy") ──────
+// El estado del documento es único ("Registrado"): lo pone el sistema al recibirlo.
 const UUID = /^[0-9a-f-]{36}$/i;
-const ESTADOS = new Set(['Registrado', 'En trámite', 'Activo', 'Archivado']);
 for (const e of creados) {
-  if (!UUID.test(e.id) || !ESTADOS.has(e.estado) || !/^\d{4}-\d{2}-\d{2}$/.test(e.fecha)) throw new Error('Dato inesperado: ' + e.numeroDocumento);
-  sql(`UPDATE expediente SET estado_id=(SELECT estado_id FROM estado_expediente WHERE nombre='${e.estado}'), fecha_registro='${e.fecha} 09:15:00'::timestamp + interval '1 day', fecha_actualizacion='${e.fecha} 09:15:00'::timestamp + interval '1 day' WHERE expediente_id='${e.id}'`);
+  if (!UUID.test(e.id) || !/^\d{4}-\d{2}-\d{2}$/.test(e.fecha)) throw new Error('Dato inesperado: ' + e.numeroDocumento);
+  sql(`UPDATE expediente SET fecha_registro='${e.fecha} 09:15:00'::timestamp + interval '1 day', fecha_actualizacion='${e.fecha} 09:15:00'::timestamp + interval '1 day' WHERE expediente_id='${e.id}'`);
   sql(`UPDATE documento_digital SET fecha_digitalizacion='${e.fecha} 11:40:00'::timestamp + interval '2 days' WHERE expediente_id='${e.id}'`);
 }
 // Los archivadores quedan completados salvo los dos últimos, que se dejan

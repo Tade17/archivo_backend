@@ -26,6 +26,7 @@ public interface DocumentoDigitalRepository extends JpaRepository<DocumentoDigit
     @Query("update DocumentoDigital d set d.ocrEstado = com.municipalidadsanjose.archivo.enums.EstadoOcr.PENDIENTE where d.rutaPdf is null and d.ocrRevisado = false and d.ocrEstado in (com.municipalidadsanjose.archivo.enums.EstadoOcr.COMPLETADO, com.municipalidadsanjose.archivo.enums.EstadoOcr.REQUIERE_REVISION)")
     int programarPdfFaltantes();
     Page<DocumentoDigital> findByExpedienteId(UUID expedienteId, Pageable pageable);
+    List<DocumentoDigital> findByExpedienteId(UUID expedienteId);
 
     @Query("select d.id from DocumentoDigital d where d.ocrEstado in :estados")
     List<UUID> findIdsByOcrEstadoIn(@Param("estados") Collection<EstadoOcr> estados);

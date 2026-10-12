@@ -10,11 +10,11 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
 
-// Sin DELETE a propósito: el expediente nunca se borra, ver ExpedienteService.
 @RestController
 @RequestMapping("/api/expedientes")
 public class ExpedienteController {
@@ -34,6 +34,13 @@ public class ExpedienteController {
     public ResponseEntity<ExpedienteResponseDTO> actualizar(@PathVariable UUID id,
                                                              @Valid @RequestBody ExpedienteRequestDTO dto) {
         return ResponseEntity.ok(expedienteService.actualizar(id, dto));
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> eliminar(@PathVariable UUID id) {
+        expedienteService.eliminar(id);
+        return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}")

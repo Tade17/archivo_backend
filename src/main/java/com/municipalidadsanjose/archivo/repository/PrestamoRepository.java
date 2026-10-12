@@ -13,4 +13,5 @@ public interface PrestamoRepository extends JpaRepository<Prestamo, UUID> {
     Page<Prestamo> findByExpedienteId(UUID expedienteId, Pageable pageable);
     Page<Prestamo> findBySolicitanteId(UUID solicitanteId, Pageable pageable);
     List<Prestamo> findByEstado(EstadoPrestamo estado);
+    boolean existsByExpedienteId(UUID expedienteId);
 }
