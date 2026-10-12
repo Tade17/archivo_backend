@@ -1,7 +1,6 @@
 package com.municipalidadsanjose.archivo.entity;
 
 import com.municipalidadsanjose.archivo.enums.EstadoPrestamo;
-import com.municipalidadsanjose.archivo.enums.TipoSolicitud;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -14,6 +13,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+/**
+ * Préstamo físico a una entidad externa. Apunta a un expediente o a un
+ * contenedor completo (uno de los dos, lo exige un CHECK en la base).
+ */
 @Entity
 @Table(name = "prestamo")
 @Getter
@@ -28,22 +31,25 @@ public class Prestamo {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "expediente_id", nullable = false)
+    @JoinColumn(name = "expediente_id")
     private Expediente expediente;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "solicitante_id", nullable = false)
-    private Usuario solicitante;
+    @JoinColumn(name = "contenedor_id")
+    private Contenedor contenedor;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "tipo_solicitud", nullable = false, length = 20)
-    private TipoSolicitud tipoSolicitud;
+    @Column(name = "solicitante_nombre", nullable = false, length = 200)
+    private String solicitanteNombre;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "registrado_por_id", nullable = false)
+    private Usuario registradoPor;
 
     @CreationTimestamp
     @Column(name = "fecha_solicitud", updatable = false, nullable = false)
     private LocalDateTime fechaSolicitud;
 
-    @Column(name = "fecha_devolucion_prevista")
+    @Column(name = "fecha_devolucion_prevista", nullable = false)
     private LocalDate fechaDevolucionPrevista;
 
     @Column(name = "fecha_devolucion_real")
@@ -52,6 +58,9 @@ public class Prestamo {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private EstadoPrestamo estado = EstadoPrestamo.PRESTADO;
+
+    @Column(name = "observaciones")
+    private String observaciones;
 
     @UpdateTimestamp
     @Column(name = "fecha_actualizacion", nullable = false)

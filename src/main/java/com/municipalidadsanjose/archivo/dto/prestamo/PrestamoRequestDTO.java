@@ -1,21 +1,26 @@
 package com.municipalidadsanjose.archivo.dto.prestamo;
 
-import com.municipalidadsanjose.archivo.enums.TipoSolicitud;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
-import java.time.LocalDate;
 import java.util.UUID;
 
+// Se presta un documento (expedienteId) o un archivador/folder (contenedorId): uno de los dos.
 public record PrestamoRequestDTO(
-        @NotNull(message = "El expediente es obligatorio")
         UUID expedienteId,
+        UUID contenedorId,
 
-        @NotNull(message = "El solicitante es obligatorio")
-        UUID solicitanteId,
+        @NotBlank(message = "Indica la entidad o persona que solicita el préstamo")
+        @Size(max = 200, message = "El nombre del solicitante no puede superar 200 caracteres")
+        String solicitante,
 
-        @NotNull(message = "El tipo de solicitud es obligatorio")
-        TipoSolicitud tipoSolicitud,
+        @Min(value = 1, message = "El plazo mínimo es de 1 día")
+        @Max(value = 365, message = "El plazo máximo es de 365 días")
+        Integer dias,
 
-        LocalDate fechaDevolucionPrevista
+        @Size(max = 500, message = "La observación no puede superar 500 caracteres")
+        String observaciones
 ) {
 }

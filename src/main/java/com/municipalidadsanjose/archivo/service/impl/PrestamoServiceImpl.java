@@ -3,109 +3,85 @@ package com.municipalidadsanjose.archivo.service.impl;
 import com.municipalidadsanjose.archivo.audit.Auditable;
 import com.municipalidadsanjose.archivo.dto.prestamo.PrestamoRequestDTO;
 import com.municipalidadsanjose.archivo.dto.prestamo.PrestamoResponseDTO;
+import com.municipalidadsanjose.archivo.entity.Contenedor;
 import com.municipalidadsanjose.archivo.entity.Expediente;
 import com.municipalidadsanjose.archivo.entity.Prestamo;
-import com.municipalidadsanjose.archivo.entity.Usuario;
 import com.municipalidadsanjose.archivo.enums.AccionAuditoria;
 import com.municipalidadsanjose.archivo.enums.EstadoPrestamo;
-import com.municipalidadsanjose.archivo.enums.TipoSolicitud;
 import com.municipalidadsanjose.archivo.exception.RecursoNoEncontradoException;
 import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
-import com.municipalidadsanjose.archivo.mapper.PrestamoMapper;
+import com.municipalidadsanjose.archivo.repository.ContenedorRepository;
 import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
 import com.municipalidadsanjose.archivo.repository.PrestamoRepository;
 import com.municipalidadsanjose.archivo.repository.UsuarioRepository;
 import com.municipalidadsanjose.archivo.service.PrestamoService;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
 public class PrestamoServiceImpl implements PrestamoService {
 
+    static final int DIAS_POR_DEFECTO = 7;
+
     private final PrestamoRepository prestamoRepository;
     private final ExpedienteRepository expedienteRepository;
+    private final ContenedorRepository contenedorRepository;
     private final UsuarioRepository usuarioRepository;
-    private final PrestamoMapper prestamoMapper;
 
     public PrestamoServiceImpl(PrestamoRepository prestamoRepository,
-                                ExpedienteRepository expedienteRepository,
-                                UsuarioRepository usuarioRepository,
-                                PrestamoMapper prestamoMapper) {
+                               ExpedienteRepository expedienteRepository,
+                               ContenedorRepository contenedorRepository,
+                               UsuarioRepository usuarioRepository) {
         this.prestamoRepository = prestamoRepository;
         this.expedienteRepository = expedienteRepository;
+        this.contenedorRepository = contenedorRepository;
         this.usuarioRepository = usuarioRepository;
-        this.prestamoMapper = prestamoMapper;
     }
 
     @Override
     @Transactional
     @Auditable(entidad = "Prestamo", accion = AccionAuditoria.CREAR)
-    public PrestamoResponseDTO crear(PrestamoRequestDTO dto) {
-        if (dto.tipoSolicitud() != TipoSolicitud.FISICO) {
-            throw new SolicitudInvalidaException("El sistema controla únicamente préstamos físicos. La consulta digital se registra mediante auditoría.");
+    public PrestamoResponseDTO crear(PrestamoRequestDTO dto, UUID registradoPorId) {
+        boolean conExpediente = dto.expedienteId() != null;
+        boolean conContenedor = dto.contenedorId() != null;
+        if (conExpediente == conContenedor) {
+            throw new SolicitudInvalidaException("Elige el documento o el archivador que se presta.");
         }
-        Expediente expediente = expedienteRepository.findById(dto.expedienteId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Expediente", dto.expedienteId()));
-        Usuario solicitante = usuarioRepository.findById(dto.solicitanteId())
-                .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.solicitanteId()));
 
-        // flush explícito: sin esto, fechaSolicitud/fechaActualizacion (generadas por
-        // Hibernate con @CreationTimestamp/@UpdateTimestamp) quedan null en la respuesta,
-        // porque el INSERT recién se ejecuta al hacer commit, no al llamar a save().
-        Prestamo guardado = prestamoRepository.saveAndFlush(prestamoMapper.toEntity(dto, expediente, solicitante));
-        return prestamoMapper.toResponseDTO(guardado);
-    }
-
-    @Override
-    @Transactional
-    @Auditable(entidad = "Prestamo", accion = AccionAuditoria.MODIFICAR)
-    public PrestamoResponseDTO actualizar(UUID id, PrestamoRequestDTO dto) {
-        if (dto.tipoSolicitud() != TipoSolicitud.FISICO) {
-            throw new SolicitudInvalidaException("Un préstamo no puede cambiarse a modalidad digital.");
+        Prestamo prestamo = new Prestamo();
+        if (conExpediente) {
+            Expediente expediente = expedienteRepository.findById(dto.expedienteId())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Expediente", dto.expedienteId()));
+            if (prestamoRepository.documentoPrestado(expediente.getId(), expediente.getContenedor().getId())) {
+                throw new SolicitudInvalidaException(
+                        "El documento " + expediente.getCodigoUnico() + " ya está prestado y no ha sido devuelto.");
+            }
+            prestamo.setExpediente(expediente);
+        } else {
+            Contenedor contenedor = contenedorRepository.findById(dto.contenedorId())
+                    .orElseThrow(() -> new RecursoNoEncontradoException("Contenedor", dto.contenedorId()));
+            if (prestamoRepository.contenedorPrestado(contenedor.getId())) {
+                throw new SolicitudInvalidaException("«" + contenedor.getDescripcion()
+                        + "» tiene un préstamo sin devolver (él o alguno de sus documentos).");
+            }
+            if (!expedienteRepository.existsByContenedorId(contenedor.getId())) {
+                throw new SolicitudInvalidaException("El contenedor no tiene documentos registrados para prestar.");
+            }
+            prestamo.setContenedor(contenedor);
         }
-        Prestamo prestamo = prestamoRepository.findById(id)
-                .orElseThrow(() -> new RecursoNoEncontradoException("Prestamo", id));
 
-        // expediente y solicitante no se reasignan en un update: identifican
-        // "quién pidió qué"; si eso cambió, es un préstamo distinto, no una edición.
-        prestamo.setTipoSolicitud(dto.tipoSolicitud());
-        prestamo.setFechaDevolucionPrevista(dto.fechaDevolucionPrevista());
-
-        // idem que en crear(): sin flush, fechaActualizacion en la respuesta
-        // muestra el valor viejo en vez del que Hibernate acaba de generar.
-        prestamoRepository.flush();
-        return prestamoMapper.toResponseDTO(prestamo);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public PrestamoResponseDTO buscarPorId(UUID id) {
-        return prestamoMapper.toResponseDTO(
-                prestamoRepository.findById(id)
-                        .orElseThrow(() -> new RecursoNoEncontradoException("Prestamo", id)));
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Page<PrestamoResponseDTO> listarTodos(Pageable pageable) {
-        return prestamoRepository.findAll(pageable).map(prestamoMapper::toResponseDTO);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Page<PrestamoResponseDTO> listarPorExpediente(UUID expedienteId, Pageable pageable) {
-        return prestamoRepository.findByExpedienteId(expedienteId, pageable).map(prestamoMapper::toResponseDTO);
-    }
-
-    @Override
-    @Transactional(readOnly = true)
-    public Page<PrestamoResponseDTO> listarPorSolicitante(UUID solicitanteId, Pageable pageable) {
-        return prestamoRepository.findBySolicitanteId(solicitanteId, pageable).map(prestamoMapper::toResponseDTO);
+        int dias = dto.dias() == null ? DIAS_POR_DEFECTO : dto.dias();
+        prestamo.setSolicitanteNombre(dto.solicitante().trim());
+        prestamo.setObservaciones(dto.observaciones() == null || dto.observaciones().isBlank()
+                ? null : dto.observaciones().trim());
+        prestamo.setFechaDevolucionPrevista(LocalDate.now().plusDays(dias));
+        prestamo.setRegistradoPor(usuarioRepository.findById(registradoPorId)
+                .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", registradoPorId)));
+        return new PrestamoResponseDTO(prestamoRepository.saveAndFlush(prestamo).getId());
     }
 
     @Override
@@ -114,27 +90,12 @@ public class PrestamoServiceImpl implements PrestamoService {
     public PrestamoResponseDTO devolver(UUID id) {
         Prestamo prestamo = prestamoRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Prestamo", id));
-
         if (prestamo.getEstado() == EstadoPrestamo.DEVUELTO) {
-            throw new SolicitudInvalidaException("Este préstamo ya fue devuelto");
+            throw new SolicitudInvalidaException("Este préstamo ya fue devuelto.");
         }
-
         prestamo.setEstado(EstadoPrestamo.DEVUELTO);
         prestamo.setFechaDevolucionReal(LocalDateTime.now());
-
-        // idem que en crear()/actualizar(): sin flush, fechaActualizacion en la
-        // respuesta muestra el valor viejo en vez del que Hibernate acaba de generar.
         prestamoRepository.flush();
-        return prestamoMapper.toResponseDTO(prestamo);
-    }
-
-    @Override
-    @Transactional
-    @Auditable(entidad = "Prestamo", accion = AccionAuditoria.ELIMINAR)
-    public void eliminar(UUID id) {
-        if (!prestamoRepository.existsById(id)) {
-            throw new RecursoNoEncontradoException("Prestamo", id);
-        }
-        prestamoRepository.deleteById(id);
+        return new PrestamoResponseDTO(prestamo.getId());
     }
 }

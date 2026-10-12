@@ -47,7 +47,9 @@ public class WorkspaceController {
     k.estado_digitalizacion AS "contenedorEstado",st.codigo AS seccion,nv.codigo AS nivel,cj.codigo AS area,
     (SELECT d.documento_id FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoId",
     (SELECT d.nombre_archivo FROM documento_digital d WHERE d.expediente_id=e.expediente_id ORDER BY d.fecha_digitalizacion,d.documento_id LIMIT 1) AS "documentoNombre",
-    (SELECT count(*) FROM documento_digital d WHERE d.expediente_id=e.expediente_id) AS "totalDocumentos"
+    (SELECT count(*) FROM documento_digital d WHERE d.expediente_id=e.expediente_id) AS "totalDocumentos",
+    EXISTS(SELECT 1 FROM prestamo pr WHERE pr.estado='PRESTADO'
+      AND (pr.expediente_id=e.expediente_id OR pr.contenedor_id=e.contenedor_id)) AS prestado
     """;
   private Map<String,Object> page(String columns,String from,List<Object> args,int page,int size,String order) {
     page=Math.max(page,0); size=Math.max(1,Math.min(size,100));

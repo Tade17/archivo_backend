@@ -66,7 +66,11 @@ public class ContenedorController {
             k.fecha_actualizacion AS "fechaActualizacion", u.nombre AS "creadoPorNombre",
             k.caja_id AS "areaId", c.codigo AS area, n.nivel_id AS "nivelId", n.codigo AS nivel,
             s.estante_id AS "seccionId", s.codigo AS seccion,
-            (SELECT count(*) FROM expediente e WHERE e.contenedor_id = k.contenedor_id) AS "totalDocumentos"
+            (SELECT count(*) FROM expediente e WHERE e.contenedor_id = k.contenedor_id) AS "totalDocumentos",
+            EXISTS(SELECT 1 FROM prestamo pr WHERE pr.estado = 'PRESTADO'
+              AND (pr.contenedor_id = k.contenedor_id
+                   OR pr.expediente_id IN (SELECT e.expediente_id FROM expediente e
+                                           WHERE e.contenedor_id = k.contenedor_id))) AS prestado
             """;
 
     @GetMapping("/contenedores")

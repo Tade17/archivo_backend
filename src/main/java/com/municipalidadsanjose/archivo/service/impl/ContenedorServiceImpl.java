@@ -13,6 +13,7 @@ import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.repository.CajaRepository;
 import com.municipalidadsanjose.archivo.repository.ContenedorRepository;
 import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
+import com.municipalidadsanjose.archivo.repository.PrestamoRepository;
 import com.municipalidadsanjose.archivo.repository.UsuarioRepository;
 import com.municipalidadsanjose.archivo.service.ContenedorService;
 import org.springframework.stereotype.Service;
@@ -27,11 +28,14 @@ public class ContenedorServiceImpl implements ContenedorService {
     private final CajaRepository cajaRepository;
     private final ExpedienteRepository expedienteRepository;
     private final UsuarioRepository usuarioRepository;
+    private final PrestamoRepository prestamoRepository;
 
     public ContenedorServiceImpl(ContenedorRepository contenedorRepository,
                                  CajaRepository cajaRepository,
                                  ExpedienteRepository expedienteRepository,
-                                 UsuarioRepository usuarioRepository) {
+                                 UsuarioRepository usuarioRepository,
+                                 PrestamoRepository prestamoRepository) {
+        this.prestamoRepository = prestamoRepository;
         this.contenedorRepository = contenedorRepository;
         this.cajaRepository = cajaRepository;
         this.expedienteRepository = expedienteRepository;
@@ -97,6 +101,9 @@ public class ContenedorServiceImpl implements ContenedorService {
         Contenedor contenedor = buscar(id);
         if (expedienteRepository.existsByContenedorId(id)) {
             throw new RecursoEnUsoException("No se puede eliminar: el contenedor ya tiene documentos registrados.");
+        }
+        if (prestamoRepository.existsByContenedorId(id)) {
+            throw new RecursoEnUsoException("No se puede eliminar: el contenedor tiene préstamos registrados.");
         }
         contenedorRepository.delete(contenedor);
     }
