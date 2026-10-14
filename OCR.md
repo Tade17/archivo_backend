@@ -63,6 +63,20 @@ La dependencia fijada es [pypdf 6.20.1, BSD-3-Clause](https://pypi.org/project/p
 
 Verificación del candidato: 46 pruebas aprobadas, incluida la suite histórica que requería pypdf; igualdad exacta de píxeles visibles en casos sintéticos con recortes y rotaciones de 0/90/180/270 grados. Una ejecución real del modelo con diez páginas sintéticas conservó imágenes y aspecto: 232466 bytes originales y 258089 bytes derivados (1,11 veces). No es una medición comparativa de rendimiento ni prueba con documentos del usuario. La activación sigue pendiente de verificación y autorización del coordinador.
 
+## Trabajos recuperables: preparado, pendiente de despliegue
+
+El candidato incorpora una cola local durable en el subdirectorio privado `jobs` del volumen OCR existente. Un único worker guarda el original y confirma un punto de control justo después de reconocer cada página. Al reiniciar, continúa las páginas pendientes sin repetir el reconocimiento de las ya confirmadas. Conserva el resultado terminado para volver a descargarlo sin ejecutar OCR. No utiliza Redis, Celery ni una base de datos nueva.
+
+La admisión reserva espacio para original, puntos de control y PDF derivado junto con los artefactos anteriores: 512 MiB compartidos, hasta ocho trabajos y 32 posiciones combinadas. Con los máximos iniciales caben aproximadamente tres trabajos completos. Cada página confirma como máximo 256 KiB; puntos de control y metadatos del resultado comparten 16 MiB por trabajo. No se amplían los límites de páginas, píxeles ni tamaño original. Si no hay capacidad se rechaza temporalmente la carga; no se crea una cola ilimitada.
+
+Los identificadores y capacidades independientes los genera el cliente; el servicio guarda únicamente el hash de la capacidad. Comprueba SHA-256 del original y una huella de configuración/modelos. Una repetición idéntica del mismo identificador devuelve su estado; un cambio de contenido o configuración se rechaza. Los diagnósticos no incluyen texto, rutas ni capacidades.
+
+Los estados son `QUEUED`, `RUNNING`, `COMPLETED`, `ERROR` y `CANCELLED`, con fase y páginas confirmadas/total. Los trabajos activos y las descargas abiertas no caducan mientras están en uso; los terminales se conservan una hora y luego se limpian al admitir, consultar o reiniciar. La cancelación actúa entre páginas y antes de publicar; no elimina originales del backend. Un reintento intencional de un trabajo terminal requiere un identificador nuevo.
+
+Las API nuevas son `/v2/jobs/config`, creación y consulta `/v2/jobs/{id}`, resultado `/v2/jobs/{id}/result` y cancelación mediante DELETE. Usan `X-Job-Capability`; la creación también verifica `X-Source-SHA256` y `X-OCR-Fingerprint`. La descarga mantiene `/v2/artifacts/{id}` y `X-Artifact-Capability`. Solo después de publicar correctamente el resultado, el backend podrá confirmar su recepción con DELETE `/v2/jobs/{id}/result`: devuelve 204 y libera el almacenamiento privado. Una descarga activa impide esa limpieza con 503; la confirmación fallida conserva el resultado. La repetición después de limpiar devuelve 404, que el cliente puede tratar como ya liberado. La limpieza confirmada puede completarse al reiniciar si hubo un fallo de disco posterior. El contrato completo y sus códigos están en `odd/tasks/ocr-scalability.md`. Las rutas antiguas siguen disponibles, pero rechazan sobrecarga con 503 en vez de esperar sin límite. `/health` distingue disponibilidad de la cola mediante `jobsReady`.
+
+Verificación aislada: 70 pruebas aprobadas y recuperación sintética de tres páginas con el modelo real: tres reconocimientos en total, ninguno repetido para la página ya confirmada. Todos los workers de prueba se cerraron. **No está desplegado ni integrado todavía con la cola Java**; el progreso visible y la recuperación del backend corresponden a las tareas siguientes. No borrar el volumen para actualizar o revertir: una versión anterior no puede continuar estos trabajos.
+
 ## Consulta del PDF reconocido
 
 El PDF está disponible en cuanto termina el procesamiento, incluso si la confianza es baja. No hay una aprobación manual obligatoria.

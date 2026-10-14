@@ -62,6 +62,7 @@ class ArtifactStore:
             raise ArtifactError('cache_invalid')
         self.lock = threading.RLock()
         self.active = {}
+        self.external_usage = lambda: (0, 0)
         self.sweep()
 
     def _path(self, ident, suffix):
@@ -122,7 +123,8 @@ class ArtifactStore:
             # Interrupted writes consume admission quota too, not just completed PDFs.
             reserved_ids = {path.name[:32] for path in self.root.iterdir()
                             if ID_PATTERN.fullmatch(path.name[:32])}
-            if len(reserved_ids) >= self.max_count or sum(path.stat().st_size for path in files) + len(data) > self.max_total_bytes:
+            external_bytes, external_count = self.external_usage()
+            if len(reserved_ids) + external_count >= self.max_count or sum(path.stat().st_size for path in files) + len(data) + external_bytes > self.max_total_bytes:
                 raise ArtifactError('cache_busy')
             ident, capability = secrets.token_hex(16), secrets.token_hex(32)
             output, manifest = self._path(ident, '.pdf'), self._path(ident, '.json')

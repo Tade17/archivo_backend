@@ -14,6 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY artifact_store.py .
+COPY job_store.py .
 COPY app.py .
 COPY searchable_pdf.py .
 
