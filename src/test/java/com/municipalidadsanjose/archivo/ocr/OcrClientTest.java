@@ -20,6 +20,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.content;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class OcrClientTest {
@@ -138,5 +139,54 @@ class OcrClientTest {
         });
         assertTrue(error.getMessage().contains("leer el archivo original"));
         assertFalse(error.getMessage().contains("private"));
+    }
+
+    @Test
+    void imageConversionSendsOriginalBytesInReceivedOrder() {
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
+        ReflectionTestUtils.setField(client, "httpClient", builder.build());
+        server.expect(requestTo("http://localhost:8091/images/pdf"))
+                .andExpect(content().json("{\"images\":[{\"fileBase64\":\"AQ==\"},{\"fileBase64\":\"Ag==\"}]}"))
+                .andRespond(withSuccess("%PDF-test", MediaType.APPLICATION_PDF));
+        byte[] result = client.unirImagenes(List.of(new ByteArrayResource(new byte[]{1}), new ByteArrayResource(new byte[]{2})));
+        assertEquals("%PDF-test", new String(result, java.nio.charset.StandardCharsets.US_ASCII));
+        server.verify();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {400, 422, 503})
+    void imageConversionErrorsAreSafeAndSpecific(int status) {
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
+        ReflectionTestUtils.setField(client, "httpClient", builder.build());
+        server.expect(requestTo("http://localhost:8091/images/pdf"))
+                .andRespond(withStatus(HttpStatus.valueOf(status)).body("private traceback"));
+        var error = assertThrows(IllegalStateException.class, () -> client.unirImagenes(List.of(file)));
+        assertFalse(error.getMessage().contains("private"));
+        assertFalse(error.getMessage().contains("conectar"));
+        server.verify();
+    }
+
+    @Test
+    void imageConversionRejectsInvalidPdfResponse() {
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
+        ReflectionTestUtils.setField(client, "httpClient", builder.build());
+        server.expect(requestTo("http://localhost:8091/images/pdf"))
+                .andRespond(withSuccess("not a PDF", MediaType.APPLICATION_PDF));
+        assertThrows(IllegalStateException.class, () -> client.unirImagenes(List.of(file)));
+        server.verify();
+    }
+
+    @Test
+    void imageConversionRejectsTotalBytesBeforeSendingRequest() {
+        var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
+        var oversized = new ByteArrayResource(new byte[20 * 1024 * 1024 + 1]);
+        var error = assertThrows(IllegalStateException.class, () -> client.unirImagenes(List.of(oversized)));
+        assertTrue(error.getMessage().contains("tamaño permitido"));
     }
 }

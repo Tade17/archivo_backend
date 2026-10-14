@@ -89,6 +89,9 @@ public class DocumentoDigital {
     @Column(name = "ruta_pdf", length = 500)
     private String rutaPdf;
 
+    @Column(name = "originales_manifest", columnDefinition = "TEXT")
+    private String originalesManifest;
+
     @Column(name = "ocr_version", nullable = false)
     private long ocrVersion;
 

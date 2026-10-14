@@ -25,6 +25,7 @@ public class OcrClient {
     private final ObjectMapper objectMapper;
     private final URI endpoint;
     private final URI pdfEndpoint;
+    private final URI imageBatchEndpoint;
 
     public OcrClient(ObjectMapper objectMapper,
                      @Value("${app.ocr.url:http://localhost:8091}") String baseUrl,
@@ -32,6 +33,7 @@ public class OcrClient {
         this.objectMapper = objectMapper;
         this.endpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/ocr");
         this.pdfEndpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/pdf");
+        this.imageBatchEndpoint = URI.create(baseUrl.replaceAll("/+$", "") + "/images/pdf");
         var factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(10));
         factory.setReadTimeout(Duration.ofSeconds(Math.max(10, timeoutSeconds)));
@@ -79,6 +81,50 @@ public class OcrClient {
             throw new IllegalStateException("No se pudo leer el archivo original para generar el PDF.", e);
         } catch (RestClientException | tools.jackson.core.JacksonException e) {
             throw new IllegalStateException("El servicio OCR devolvió una respuesta inválida.", e);
+        }
+    }
+
+    public byte[] unirImagenes(java.util.List<Resource> images) {
+        final int maxBytes = 20 * 1024 * 1024;
+        try {
+            if (images.isEmpty() || images.size() > 100) {
+                throw new IllegalStateException("Selecciona entre 1 y 100 imágenes.");
+            }
+            var payload = new java.util.ArrayList<java.util.Map<String, String>>();
+            int total = 0;
+            for (Resource image : images) {
+                byte[] data;
+                try (var input = image.getInputStream()) {
+                    data = input.readNBytes(maxBytes - total + 1);
+                }
+                total += data.length;
+                if (data.length == 0 || total > maxBytes) {
+                    throw new IllegalStateException("Las imágenes superan el tamaño permitido o están vacías.");
+                }
+                payload.add(java.util.Map.of("fileBase64", Base64.getEncoder().encodeToString(data)));
+            }
+            byte[] result = httpClient.post().uri(imageBatchEndpoint).contentType(MediaType.APPLICATION_JSON)
+                    .body(objectMapper.writeValueAsString(java.util.Map.of("images", payload)))
+                    .exchange((request, response) -> {
+                        if (!response.getStatusCode().is2xxSuccessful()) {
+                            throw new RestClientResponseException("Image conversion failed", response.getStatusCode(),
+                                    "", response.getHeaders(), new byte[0], StandardCharsets.UTF_8);
+                        }
+                        return response.getBody().readNBytes(maxBytes + 1);
+                    });
+            if (result == null || result.length < 5 || result.length > maxBytes
+                    || !new String(result, 0, 5, StandardCharsets.US_ASCII).equals("%PDF-")) {
+                throw new IllegalStateException("El servicio no devolvió un PDF combinado válido dentro del límite de tamaño.");
+            }
+            return result;
+        } catch (RestClientResponseException e) {
+            throw serviceFailure(e);
+        } catch (ResourceAccessException e) {
+            throw connectionFailure(e);
+        } catch (IOException e) {
+            throw new IllegalStateException("No se pudieron leer las imágenes originales.", e);
+        } catch (RestClientException | tools.jackson.core.JacksonException e) {
+            throw new IllegalStateException("El servicio OCR devolvió una respuesta inválida al unir las imágenes.", e);
         }
     }
 

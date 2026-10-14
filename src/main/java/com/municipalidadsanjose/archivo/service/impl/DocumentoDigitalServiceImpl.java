@@ -15,11 +15,15 @@ import com.municipalidadsanjose.archivo.repository.DocumentoDigitalRepository;
 import com.municipalidadsanjose.archivo.repository.ExpedienteRepository;
 import com.municipalidadsanjose.archivo.repository.UsuarioRepository;
 import com.municipalidadsanjose.archivo.service.DocumentoDigitalService;
+import com.municipalidadsanjose.archivo.service.DocumentoImageBatchService;
 import com.municipalidadsanjose.archivo.storage.FileStorageService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import tools.jackson.databind.ObjectMapper;
 
 import java.util.UUID;
 
@@ -32,19 +36,21 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
     private final DocumentoDigitalMapper documentoDigitalMapper;
     private final FileStorageService fileStorageService;
     private final OcrService ocrService;
+    private final ObjectMapper objectMapper;
 
     public DocumentoDigitalServiceImpl(DocumentoDigitalRepository documentoDigitalRepository,
                                         ExpedienteRepository expedienteRepository,
                                         UsuarioRepository usuarioRepository,
                                         DocumentoDigitalMapper documentoDigitalMapper,
                                         FileStorageService fileStorageService,
-                                        OcrService ocrService) {
+                                        OcrService ocrService, ObjectMapper objectMapper) {
         this.documentoDigitalRepository = documentoDigitalRepository;
         this.expedienteRepository = expedienteRepository;
         this.usuarioRepository = usuarioRepository;
         this.documentoDigitalMapper = documentoDigitalMapper;
         this.fileStorageService = fileStorageService;
         this.ocrService = ocrService;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -131,11 +137,20 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
     public void eliminar(UUID id) {
         DocumentoDigital documento = documentoDigitalRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", id));
-        // Borra primero la fila y recién después el archivo físico: si el archivo
-        // no se pudiera borrar por algún motivo, preferimos un huérfano en disco
-        // (se puede limpiar después) antes que una fila fantasma sin archivo.
+        var paths = new java.util.ArrayList<String>();
+        paths.add(documento.getRutaAlmacenamiento());
+        if (documento.getRutaPdf() != null) paths.add(documento.getRutaPdf());
+        DocumentoImageBatchService.readManifest(documento, objectMapper)
+                .forEach(original -> paths.add(original.rutaAlmacenamiento()));
+        // Never remove originals before the database deletion commits.
+        if (!TransactionSynchronizationManager.isActualTransactionActive()
+                || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("La eliminación requiere una transacción activa.");
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() { DocumentoImageBatchService.cleanup(fileStorageService, paths); }
+        });
         documentoDigitalRepository.delete(documento);
-        fileStorageService.eliminar(documento.getRutaAlmacenamiento());
-        if (documento.getRutaPdf() != null) fileStorageService.eliminar(documento.getRutaPdf());
     }
 }

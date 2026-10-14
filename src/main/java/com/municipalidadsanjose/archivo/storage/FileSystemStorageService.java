@@ -13,7 +13,6 @@ import java.net.MalformedURLException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -75,21 +74,36 @@ public class FileSystemStorageService implements FileStorageService {
             throw new SolicitudInvalidaException("Subcarpeta de almacenamiento inválida");
         }
 
+        Path destino = directorio.resolve(UUID.randomUUID() + extensionDe(archivo.getOriginalFilename()));
+        boolean created = false;
         try {
             Files.createDirectories(directorio);
-            String nombreFisico = UUID.randomUUID() + extensionDe(archivo.getOriginalFilename());
-            Path destino = directorio.resolve(nombreFisico);
 
             String hash;
             try (DigestInputStream digestStream = new DigestInputStream(
                     archivo.getInputStream(), MessageDigest.getInstance("SHA-256"))) {
-                Files.copy(digestStream, destino, StandardCopyOption.REPLACE_EXISTING);
+                long size = 0;
+                var outputStream = Files.newOutputStream(destino, java.nio.file.StandardOpenOption.CREATE_NEW);
+                created = true;
+                try (var output = outputStream) {
+                    byte[] buffer = new byte[8192];
+                    int count;
+                    while ((count = digestStream.read(buffer)) != -1) {
+                        size += count;
+                        if (size > maxTamanoBytes) throw new SolicitudInvalidaException("El archivo supera el tamaño máximo permitido.");
+                        output.write(buffer, 0, count);
+                    }
+                }
+                if (size != archivo.getSize()) throw new SolicitudInvalidaException("El tamaño del archivo no coincide con el contenido recibido.");
                 hash = HexFormat.of().formatHex(digestStream.getMessageDigest().digest());
             }
 
             String rutaRelativa = baseDir.relativize(destino).toString().replace('\\', '/');
             return new ArchivoAlmacenado(rutaRelativa, hash, archivo.getSize());
-        } catch (IOException | NoSuchAlgorithmException e) {
+        } catch (IOException | NoSuchAlgorithmException | RuntimeException e) {
+            try { if (created) Files.deleteIfExists(destino); }
+            catch (IOException cleanupError) { e.addSuppressed(cleanupError); }
+            if (e instanceof SolicitudInvalidaException invalid) throw invalid;
             throw new IllegalStateException("No se pudo guardar el archivo '" + archivo.getOriginalFilename() + "'", e);
         }
     }

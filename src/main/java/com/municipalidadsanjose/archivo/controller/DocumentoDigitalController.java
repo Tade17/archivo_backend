@@ -2,13 +2,12 @@ package com.municipalidadsanjose.archivo.controller;
 
 import com.municipalidadsanjose.archivo.dto.common.PaginaResponseDTO;
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalActualizarDTO;
-import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalRequestDTO;
 import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoDigitalResponseDTO;
-import com.municipalidadsanjose.archivo.exception.SolicitudInvalidaException;
 import com.municipalidadsanjose.archivo.security.UsuarioPrincipal;
 import com.municipalidadsanjose.archivo.ocr.OcrService;
 import com.municipalidadsanjose.archivo.service.DocumentoDigitalService;
-import com.municipalidadsanjose.archivo.storage.ArchivoAlmacenado;
+import com.municipalidadsanjose.archivo.service.DocumentoImageBatchService;
+import com.municipalidadsanjose.archivo.dto.documentodigital.DocumentoOriginalDTO;
 import com.municipalidadsanjose.archivo.storage.FileStorageService;
 import jakarta.validation.Valid;
 import org.springdoc.core.annotations.ParameterObject;
@@ -23,12 +22,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,6 +33,7 @@ import java.util.UUID;
 public class DocumentoDigitalController {
 
     private final DocumentoDigitalService documentoDigitalService;
+    private final DocumentoImageBatchService imageBatchService;
     private final FileStorageService fileStorageService;
     private final OcrService ocrService;
     private final com.municipalidadsanjose.archivo.ocr.OcrPdfService ocrPdf;
@@ -44,17 +41,15 @@ public class DocumentoDigitalController {
     public DocumentoDigitalController(DocumentoDigitalService documentoDigitalService,
                                        FileStorageService fileStorageService,
                                        OcrService ocrService,
-                                       com.municipalidadsanjose.archivo.ocr.OcrPdfService ocrPdf) {
+                                       com.municipalidadsanjose.archivo.ocr.OcrPdfService ocrPdf, DocumentoImageBatchService imageBatchService) {
         this.documentoDigitalService = documentoDigitalService;
         this.fileStorageService = fileStorageService;
         this.ocrService = ocrService;
         this.ocrPdf = ocrPdf;
+        this.imageBatchService = imageBatchService;
     }
 
-    // Acepta uno o varios archivos en un solo request (flujo de digitalización
-    // por lote: se escanean varias páginas/documentos de un mismo expediente de
-    // una sola vez). Cada archivo se guarda bajo storage/documentos/<expedienteId>/
-    // y genera su propio DocumentoDigital, auditado individualmente.
+    // PDFs remain separate; images form one ordered PDF with preserved originals.
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Transactional
     public ResponseEntity<List<DocumentoDigitalResponseDTO>> crear(
@@ -65,44 +60,27 @@ public class DocumentoDigitalController {
             @RequestParam(required = false) String formatoSalida,
             @RequestParam("archivos") List<MultipartFile> archivos,
             @AuthenticationPrincipal UsuarioPrincipal principal) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(imageBatchService.crear(
+                expedienteId, principal.getId(), escanerUtilizado, resolucionDpi, formatoSalida, archivos));
+    }
 
-        if (archivos.isEmpty()) {
-            throw new SolicitudInvalidaException("Selecciona al menos un archivo.");
-        }
-        // El técnico responsable siempre es quien está autenticado, nunca lo que
-        // mande el cliente: evita que alguien le adjudique la subida a otro usuario.
-        tecnicoResponsableId = principal.getId();
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/{id}/originales")
+    public ResponseEntity<List<DocumentoOriginalDTO>> originales(@PathVariable UUID id) {
+        return ResponseEntity.ok().header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(imageBatchService.originales(id));
+    }
 
-        List<DocumentoDigitalResponseDTO> creados = new ArrayList<>();
-        for (MultipartFile archivo : archivos) {
-            ArchivoAlmacenado guardado = fileStorageService.guardar(expedienteId.toString(), archivo);
-            // Si la transacción falla después de guardar el archivo en disco (p.ej. un
-            // documento posterior del lote falla la validación), el archivo huérfano
-            // se borra: el filesystem no tiene rollback, así que lo hacemos a mano.
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCompletion(int status) {
-                    if (status != TransactionSynchronization.STATUS_COMMITTED) {
-                        fileStorageService.eliminar(guardado.rutaRelativa());
-                    }
-                }
-            });
-            String nombreOriginal = archivo.getOriginalFilename() != null ? archivo.getOriginalFilename() : "documento";
-
-            DocumentoDigitalRequestDTO dto = new DocumentoDigitalRequestDTO(
-                    expedienteId,
-                    nombreOriginal,
-                    guardado.rutaRelativa(),
-                    archivo.getContentType(),
-                    guardado.hashSha256(),
-                    tecnicoResponsableId,
-                    escanerUtilizado,
-                    resolucionDpi,
-                    formatoSalida,
-                    null);
-            creados.add(documentoDigitalService.crear(dto));
-        }
-        return ResponseEntity.status(HttpStatus.CREATED).body(creados);
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/{id}/originales/{orden}")
+    public ResponseEntity<Resource> descargarOriginal(@PathVariable UUID id, @PathVariable int orden) {
+        var original = imageBatchService.original(id, orden);
+        documentoDigitalService.registrarDescarga(id);
+        return ResponseEntity.ok().contentType(MediaType.parseMediaType(original.metadata().tipoMime()))
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()
+                        .filename(original.metadata().nombreArchivo(), java.nio.charset.StandardCharsets.UTF_8).build().toString())
+                .body(original.resource());
     }
 
     @PutMapping("/{id}")

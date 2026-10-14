@@ -45,13 +45,23 @@ class SearchablePdfTests(unittest.TestCase):
         image = self.pages[0]
         ImageDraw.Draw(image).text((100, 200), "Original scanned document", fill="black")
         data = build_pdf([image], self.layout[:1])
-        with pdfium.PdfDocument(data) as document:
-            bitmap = document[0].render(scale=220 / 72)
-            rendered = bitmap.to_pil().convert("RGB")
-            # PDF rendering rounds dimensions; compare the original pixel area.
-            rendered = rendered.crop((0, 0, image.width, image.height))
-            difference = ImageChops.difference(image, rendered)
-            self.assertIsNone(difference.getbbox())
+        document = pdfium.PdfDocument(data)
+        try:
+            page = document[0]
+            try:
+                bitmap = page.render(scale=220 / 72)
+                try:
+                    rendered = bitmap.to_pil().convert("RGB")
+                    # PDF rendering rounds dimensions; compare the original pixel area.
+                    rendered = rendered.crop((0, 0, image.width, image.height))
+                    difference = ImageChops.difference(image, rendered)
+                    self.assertIsNone(difference.getbbox())
+                finally:
+                    bitmap.close()
+            finally:
+                page.close()
+        finally:
+            document.close()
 
     def test_layout_must_match_original_and_stay_inside_page(self):
         with self.assertRaises(ValueError):

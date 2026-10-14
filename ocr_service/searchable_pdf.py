@@ -65,9 +65,21 @@ def validate_layout(pages: list[Image.Image], layout: object) -> list[dict]:
     return layout
 
 
-def build_pdf(pages: list[Image.Image], layout: object, dpi: int = 220) -> bytes:
+class BoundedPdfBuffer(io.BytesIO):
+    def __init__(self, max_bytes: int):
+        super().__init__()
+        self.max_bytes = max_bytes
+
+    def write(self, data):
+        if self.tell() + len(data) > self.max_bytes:
+            raise ValueError("El PDF combinado supera el tamaño máximo permitido")
+        return super().write(data)
+
+
+def build_pdf(pages: list[Image.Image], layout: object, dpi: int = 220,
+              max_output_bytes: int | None = None) -> bytes:
     layout = validate_layout(pages, layout)
-    output = io.BytesIO()
+    output = BoundedPdfBuffer(max_output_bytes) if max_output_bytes is not None else io.BytesIO()
     pdf = canvas.Canvas(output, pageCompression=1)
     pdf.setTitle("Documento digitalizado con texto OCR")
     font = text_font()

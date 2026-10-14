@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import io
+import json
 import os
 import threading
 from functools import lru_cache
@@ -8,7 +9,7 @@ from functools import lru_cache
 import numpy as np
 import pypdfium2 as pdfium
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from PIL import Image, ImageSequence
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
 from searchable_pdf import build_pdf
 
@@ -18,6 +19,8 @@ MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", str(25 * 1024 * 1024)))
 MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "100"))
 PDF_DPI = int(os.getenv("OCR_PDF_DPI", "220"))
 MAX_PIXELS = int(os.getenv("OCR_MAX_PIXELS", "250000000"))
+IMAGE_BATCH_MAX_BYTES = 20 * 1024 * 1024
+IMAGE_BATCH_MAX_FILES = 100
 _engine_lock = threading.Lock()
 
 
@@ -206,3 +209,63 @@ async def regenerate_pdf(request: Request) -> Response:
         raise
     except Exception as error:
         raise HTTPException(status_code=422, detail="No se pudo generar el PDF del documento") from error
+
+
+def combine_images(files: object) -> bytes:
+    if not isinstance(files, list) or not 1 <= len(files) <= IMAGE_BATCH_MAX_FILES:
+        raise ValueError("Selecciona entre 1 y 100 imágenes")
+    pages = []
+    total_bytes = pixels = 0
+    try:
+        for item in files:
+            if not isinstance(item, dict) or not isinstance(item.get("fileBase64"), str):
+                raise ValueError("Imagen inválida")
+            encoded = item["fileBase64"]
+            if len(encoded) > 4 * ((IMAGE_BATCH_MAX_BYTES - total_bytes + 2) // 3):
+                raise ValueError("Las imágenes superan el tamaño máximo permitido")
+            data = base64.b64decode(encoded, validate=True)
+            total_bytes += len(data)
+            if not data or total_bytes > IMAGE_BATCH_MAX_BYTES:
+                raise ValueError("Las imágenes están vacías o superan el tamaño máximo permitido")
+            # Decode actual image headers; client MIME and extension are not authority.
+            with Image.open(io.BytesIO(data)) as image:
+                if image.format not in {"PNG", "JPEG", "TIFF"}:
+                    raise ValueError("Solo se permiten imágenes PNG, JPEG o TIFF")
+                frame_count = getattr(image, "n_frames", 1)
+                page_limit = min(MAX_PAGES, 100)
+                if len(pages) + frame_count > page_limit:
+                    raise ValueError(f"Las imágenes superan el máximo de {page_limit} páginas")
+                for index in range(frame_count):
+                    image.seek(index)
+                    pixels += image.width * image.height
+                    if pixels > min(MAX_PIXELS, 250_000_000):
+                        raise ValueError("Las imágenes superan el máximo de píxeles permitido")
+                    pages.append(image.convert("RGB"))
+        layout = [{"width": page.width, "height": page.height, "blocks": []} for page in pages]
+        return build_pdf(pages, layout, PDF_DPI, max_output_bytes=IMAGE_BATCH_MAX_BYTES)
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as error:
+        raise ValueError("Una imagen está dañada o no es válida") from error
+    finally:
+        for page in pages:
+            page.close()
+
+
+@app.post("/images/pdf")
+async def image_batch_pdf(request: Request) -> Response:
+    # Bound the envelope while reading, before JSON/base64 allocations.
+    max_envelope = 4 * ((IMAGE_BATCH_MAX_BYTES + 2) // 3) + 100_000
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > max_envelope:
+            raise HTTPException(status_code=413, detail="La solicitud supera el tamaño permitido")
+        body.extend(chunk)
+    try:
+        payload = json.loads(body)
+        if not isinstance(payload, dict):
+            raise ValueError("Solicitud de imágenes inválida")
+        result = await asyncio.to_thread(combine_images, payload.get("images"))
+        return Response(content=result, media_type="application/pdf")
+    except (ValueError, TypeError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="No se pudo unir las imágenes en PDF") from error

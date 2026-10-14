@@ -4,7 +4,17 @@ El sistema reconoce texto localmente con **RapidOCR**, usando detección y clasi
 
 ## Funcionamiento
 
-1. El backend guarda el PDF, TIFF, JPG o PNG y crea el registro del documento.
+En una misma carga, las imágenes PNG/JPEG/TIFF se unen en `imagenes.pdf` en el orden recibido. Cada TIFF aporta sus fotogramas en su orden interno. Los PDF subidos permanecen separados; si se intercalan imágenes y PDF, el grupo ocupa la posición de la primera imagen. No se ordena por nombre.
+
+Primero se convierte el lote de imágenes, sin OCR. Después de confirmar la transacción se encola el OCR automático del PDF combinado mediante el evento existente. La carga requiere que el servicio local OCR esté disponible para convertir las imágenes; si falla la conversión, se revierte el lote y se limpian sus archivos. La creación del expediente y su carga posterior siguen siendo operaciones independientes: un fallo de carga no elimina el expediente ya creado.
+
+Los originales se conservan byte por byte, con nombre, tipo real detectado, tamaño, hash y posición en un manifiesto asociado al documento. `GET /api/documentos-digitales/{id}/originales` lista los metadatos; `GET /api/documentos-digitales/{id}/originales/{orden}` descarga una imagen (posición desde 1), requiere autenticación y registra auditoría. Las rutas internas no forman parte de esa lista. En documentos históricos sin manifiesto, la lista está vacía y `/archivo` mantiene su comportamiento original. Eliminar el documento elimina el PDF combinado, el PDF OCR y sus imágenes originales solo después de confirmar la eliminación en base de datos.
+
+Límites: 100 archivos por carga, 20 MB por archivo, 20 MB en total para las imágenes y para el PDF combinado, 100 páginas y 250 millones de píxeles. Los límites configurados más bajos también se respetan. El tipo MIME declarado por el navegador no decide el formato: el backend comprueba firmas y el conversor valida y decodifica el contenido de cada imagen.
+
+Despliegue de este cambio: reconstruir solo OCR y reiniciar el backend actualizado. Flyway aplicará automáticamente `V12__documento_originales.sql`, que añade una columna de manifiesto nullable, sin convertir ni modificar documentos históricos. No aplicar la migración manualmente ni reiniciar la base de datos.
+
+1. El backend valida los archivos y guarda cada PDF separado o el PDF combinado y sus imágenes originales; crea un registro por documento resultante.
 2. La respuesta al usuario no espera al OCR.
 3. Un worker envía el archivo al servicio `archivo-ocr`.
 4. El servicio procesa todas las páginas y devuelve texto, confianza y cantidad de páginas.
