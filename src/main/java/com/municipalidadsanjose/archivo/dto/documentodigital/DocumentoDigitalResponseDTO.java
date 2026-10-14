@@ -28,6 +28,10 @@ public record DocumentoDigitalResponseDTO(
         boolean ocrRevisado,
         LocalDateTime ocrActualizadoEn,
         LocalDateTime fechaActualizacion,
+        Integer ocrPaginasProcesadas,
+        Integer ocrPaginasTotales,
+        String ocrFase,
+        LocalDateTime ocrProximoReintento,
         boolean pdfDisponible
 ) {
 }

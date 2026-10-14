@@ -202,16 +202,23 @@ class DocumentoImageBatchServiceTest {
     void originalsDeletionRunsOnlyAfterCommit() throws Exception {
         var result = upload(image("a.png"), image("b.png"));
         saved.get(0).setRutaPdf("exp/searchable.pdf");
+        saved.get(0).setOcrJobId("a".repeat(32));
+        saved.get(0).setOcrJobCapability("b".repeat(64));
+        when(repository.findLockedById(result.get(0).id())).thenReturn(Optional.of(saved.get(0)));
+        var ocr = mock(com.municipalidadsanjose.archivo.ocr.OcrService.class);
         var implementation = new com.municipalidadsanjose.archivo.service.impl.DocumentoDigitalServiceImpl(repository,
                 mock(com.municipalidadsanjose.archivo.repository.ExpedienteRepository.class),
                 mock(com.municipalidadsanjose.archivo.repository.UsuarioRepository.class),
                 mock(com.municipalidadsanjose.archivo.mapper.DocumentoDigitalMapper.class), storage,
-                mock(com.municipalidadsanjose.archivo.ocr.OcrService.class), new ObjectMapper());
+                ocr, new ObjectMapper());
         implementation.eliminar(result.get(0).id());
+        verify(repository).findLockedById(result.get(0).id());
         verify(repository).delete(saved.get(0));
+        verifyNoInteractions(ocr);
         verify(storage, never()).eliminar(anyString());
         TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
         verify(storage, times(4)).eliminar(anyString());
+        verify(ocr).cancelarRemoto("a".repeat(32), "b".repeat(64));
     }
 
     @Test

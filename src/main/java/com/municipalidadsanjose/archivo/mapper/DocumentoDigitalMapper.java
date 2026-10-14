@@ -31,7 +31,7 @@ public class DocumentoDigitalMapper {
                 documento.getExpediente().getId(),
                 documento.getExpediente().getCodigoUnico(),
                 documento.getNombreArchivo(),
-                documento.getRutaAlmacenamiento(),
+                null, // Internal storage paths are not a public download contract.
                 documento.getTipoMime(),
                 documento.getHashSha256(),
                 documento.getFechaDigitalizacion(),
@@ -48,6 +48,10 @@ public class DocumentoDigitalMapper {
                 documento.isOcrRevisado(),
                 documento.getOcrActualizadoEn(),
                 documento.getFechaActualizacion(),
+                documento.getOcrPaginasProcesadas(),
+                documento.getOcrPaginasTotales(),
+                documento.getOcrFase(),
+                documento.getOcrNextRetryAt(),
                 documento.getRutaPdf() != null
         );
     }

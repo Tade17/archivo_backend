@@ -77,6 +77,18 @@ Las API nuevas son `/v2/jobs/config`, creación y consulta `/v2/jobs/{id}`, resu
 
 Verificación aislada: 70 pruebas aprobadas y recuperación sintética de tres páginas con el modelo real: tres reconocimientos en total, ninguno repetido para la página ya confirmada. Todos los workers de prueba se cerraron. **No está desplegado ni integrado todavía con la cola Java**; el progreso visible y la recuperación del backend corresponden a las tareas siguientes. No borrar el volumen para actualizar o revertir: una versión anterior no puede continuar estos trabajos.
 
+## Cola del backend y progreso: preparado, pendiente de despliegue
+
+El candidato Java consulta continuamente la cola PostgreSQL, reclamando un documento cada vez. No envía todos los documentos a una cola limitada de threads: los registros pendientes permanecen en la base hasta ser atendidos. Una lease identifica al worker y caduca si deja de renovarse; un heartbeat independiente la mantiene durante comunicaciones y descargas. El inicio no reinicia leases activas ni reintenta automáticamente documentos históricos en ERROR.
+
+El identificador, la capacidad y la huella del trabajo OCR se guardan de forma privada antes de enviarlo. Los reintentos de comunicación conservan esa identidad y los puntos de control Python. Se permiten hasta cinco reintentos automáticos transitorios, con espera creciente; archivos inválidos y errores terminales requieren una decisión explícita. Si un trabajo ya enviado caducó en Python, no se vuelve a reconocer silenciosamente. El botón de reintento no puede duplicar un documento pendiente o procesándose.
+
+El resultado solo se publica si siguen vigentes la lease y el identificador del trabajo. Primero se confirma la actualización en PostgreSQL; después se limpia el PDF anterior y se confirma la recepción en Python. Una confirmación remota fallida no revierte el documento publicado. La eliminación usa el mismo bloqueo y cancela el trabajo remoto solo después de confirmar su transacción.
+
+La respuesta incorpora `ocrPaginasProcesadas`, `ocrPaginasTotales`, `ocrFase` y `ocrProximoReintento`, todos compatibles con valores null históricos. No expone capacidades, propietarios de lease ni rutas privadas; el campo antiguo `rutaAlmacenamiento` queda null y las rutas de descarga autenticadas no cambian. La interfaz con este progreso corresponde a S5, todavía pendiente.
+
+`V13__ocr_jobs_progress.sql` añade columnas nullable y un índice de cola, sin modificar originales. Se verificó únicamente en PostgreSQL desechable con una marca de propiedad y un puerto/base distintos de producción. **Antes del despliegue se necesita una copia actual de producción y detener el backend anterior**; después se actualiza OCR y arranca el backend nuevo con el procedimiento operativo de este equipo. No ejecutar versiones vieja y nueva simultáneamente ni borrar volúmenes o columnas para revertir. El despliegue y la migración real siguen pendientes.
+
 ## Consulta del PDF reconocido
 
 El PDF está disponible en cuanto termina el procesamiento, incluso si la confianza es baja. No hay una aprobación manual obligatoria.
@@ -95,7 +107,7 @@ Estados posibles:
 - `REQUIERE_REVISION`: no se encontró texto suficiente o la confianza quedó debajo del umbral.
 - `ERROR`: el servicio no pudo procesar el archivo; puede reintentarse desde la interfaz.
 
-Los trabajos pendientes se recuperan al reiniciar el backend. Un procesamiento que quedó interrumpido también vuelve automáticamente a la cola.
+Los trabajos pendientes permanecen en PostgreSQL. En el candidato de cola durable, un procesamiento interrumpido se reclama cuando su lease caduca; no se reinicia un worker cuya lease sigue activa.
 
 ## Iniciar el entorno
 

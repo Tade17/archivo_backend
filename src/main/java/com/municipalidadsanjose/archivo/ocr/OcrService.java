@@ -22,13 +22,15 @@ public class OcrService {
     private final DocumentoDigitalRepository documentos;
     private final ApplicationEventPublisher events;
     private final boolean enabled;
+    private final OcrClient client;
 
     public OcrService(DocumentoDigitalRepository documentos,
-                      ApplicationEventPublisher events,
+                      ApplicationEventPublisher events, OcrClient client,
                       @Value("${app.ocr.enabled:true}") boolean enabled) {
         this.documentos = documentos;
         this.events = events;
         this.enabled = enabled;
+        this.client = client;
     }
 
     public void solicitar(UUID documentoId) {
@@ -39,22 +41,35 @@ public class OcrService {
     public void reintentar(UUID documentoId) {
         DocumentoDigital documento = documentos.findLockedById(documentoId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", documentoId));
-        if (documento.getOcrEstado() == EstadoOcr.PROCESANDO) {
+        if (documento.getOcrEstado() == EstadoOcr.PROCESANDO || documento.getOcrEstado() == EstadoOcr.PENDIENTE) {
             throw new SolicitudInvalidaException("El documento ya se está procesando.");
         }
         if (documento.isOcrRevisado()) {
             throw new SolicitudInvalidaException("El texto contiene correcciones guardadas. Reprocesarlo las reemplazaría; conserva y edita el PDF actual.");
         }
-        documentos.marcarPendiente(documentoId, LocalDateTime.now());
+        String oldJob = documento.getOcrJobId(), oldCapability = documento.getOcrJobCapability();
+        documentos.reiniciarJob(documentoId);
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                new org.springframework.transaction.support.TransactionSynchronization() {
+                    @Override public void afterCommit() { cancelarRemoto(oldJob, oldCapability); }
+                });
+        }
         solicitar(documentoId);
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void recuperarPendientes() {
         if (!enabled) return;
-        documentos.recuperarProcesamientosInterrumpidos(LocalDateTime.now());
+        // Claims recover only expired leases; never reset a live worker or enumerate a thread queue.
         documentos.programarPdfFaltantes();
-        List<UUID> pendientes = documentos.findIdsByOcrEstadoIn(List.of(EstadoOcr.PENDIENTE));
-        pendientes.forEach(this::solicitar);
+    }
+
+    public void cancelarRemoto(String job, String capability) {
+        if (job == null || capability == null) return;
+        try { client.cancelarJob(job, capability); }
+        catch (RuntimeException error) {
+            org.slf4j.LoggerFactory.getLogger(OcrService.class).warn("event=ocr_cancel_failed category={}", error.getClass().getSimpleName());
+        }
     }
 }

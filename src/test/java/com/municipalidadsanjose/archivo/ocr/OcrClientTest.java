@@ -305,4 +305,57 @@ class OcrClientTest {
         assertThrows(OcrClient.OcrFailure.class, () -> client.descargarPdf(artifact, binaryStorage(), "exp"));
         server.verify();
     }
+
+    private OcrClient jobsClient(String path, ResponseCreator reply) {
+        var builder=RestClient.builder(); server=MockRestServiceServer.bindTo(builder).build();
+        var client=new OcrClient(new ObjectMapper(),"http://localhost:8091",10);
+        ReflectionTestUtils.setField(client,"httpClient",builder.build());
+        server.expect(requestTo("http://localhost:8091/v2/jobs/"+path)).andRespond(reply);
+        return client;
+    }
+
+    @Test void durableSubmitCarriesStableIdentityHashAndFingerprint() throws Exception {
+        String id="a".repeat(32),cap="b".repeat(64),fingerprint="c".repeat(64);
+        String digest=java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(new byte[]{1,2,3}));
+        var builder=RestClient.builder(); server=MockRestServiceServer.bindTo(builder).build();
+        var client=new OcrClient(new ObjectMapper(),"http://localhost:8091",10);
+        ReflectionTestUtils.setField(client,"httpClient",builder.build());
+        server.expect(requestTo("http://localhost:8091/v2/jobs/"+id))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-Job-Capability",cap))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-Source-SHA256",digest))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-OCR-Fingerprint",fingerprint))
+                .andExpect(content().bytes(new byte[]{1,2,3}))
+                .andRespond(withSuccess("{\"id\":\""+id+"\",\"state\":\"QUEUED\",\"phase\":\"QUEUED\",\"pages\":3,\"completedPages\":0}",MediaType.APPLICATION_JSON));
+        assertEquals("QUEUED",client.enviarJob(id,cap,fingerprint,digest,file).state()); server.verify();
+    }
+
+    @Test void durableConfigFingerprintIsBoundedAndValidated() {
+        var client=jobsClient("config",withSuccess("{\"engineFingerprint\":\""+"c".repeat(64)+"\",\"maxInputBytes\":26214400,\"maxPages\":100}",MediaType.APPLICATION_JSON));
+        assertEquals("c".repeat(64),client.engineFingerprint()); server.verify();
+    }
+
+    @ParameterizedTest @ValueSource(ints={400,404,409,413,422,429,500,503,504})
+    void durableHttpFailureClassificationIsSafeAndRetryBounded(int status) {
+        var client=jobsClient("a".repeat(32),withRawStatus(status).body("private capability /path"));
+        var error=assertThrows(OcrClient.OcrFailure.class,()->client.consultarJob("a".repeat(32),"b".repeat(64)));
+        assertEquals(status==429||status>=500,error.transientFailure());
+        assertEquals("OCR_JOB_HTTP_"+status,error.code()); assertFalse(error.getMessage().contains("private"));
+        server.verify();
+    }
+
+    @Test void acknowledgementAlreadyCleanedIsIdempotent() {
+        var client=jobsClient("a".repeat(32)+"/result",withStatus(HttpStatus.NOT_FOUND));
+        assertDoesNotThrow(()->client.confirmarJob("a".repeat(32),"b".repeat(64))); server.verify();
+    }
+
+    @Test void mismatchedSourceHashNeverSubmits() {
+        var client=new OcrClient(new ObjectMapper(),"http://localhost:8091",10);
+        var error=assertThrows(OcrClient.OcrFailure.class,()->client.enviarJob("a".repeat(32),"b".repeat(64),"c".repeat(64),"d".repeat(64),file));
+        assertEquals("OCR_INPUT_HASH",error.code()); assertFalse(error.transientFailure());
+    }
+
+    @Test void malformedProgressDoesNotBecomeSuccess() {
+        var client=jobsClient("a".repeat(32),withSuccess("{\"id\":\""+"a".repeat(32)+"\",\"state\":\"RUNNING\",\"phase\":\"RECOGNIZING\",\"pages\":3,\"completedPages\":4}",MediaType.APPLICATION_JSON));
+        assertEquals("OCR_JOB_METADATA_INVALID",assertThrows(OcrClient.OcrFailure.class,()->client.consultarJob("a".repeat(32),"b".repeat(64))).code()); server.verify();
+    }
 }

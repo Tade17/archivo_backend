@@ -24,7 +24,7 @@ Deliver large searchable PDFs without Base64 response expansion, process long do
 - [x] S1: Small JSON metadata and bounded binary PDF artifacts, atomic storage and safe diagnostic codes; compatible legacy endpoints. Delegated: multi-file/preparation/execution triggers.
 - [x] S2: Original-PDF invisible text overlays, bounded page rendering, Unicode/rotation/cropbox regressions; pin verified BSD pypdf dependency. Delegated: multi-file/PDF verification triggers. Committed 9d3969a; deployment pending.
 - [x] S3: Durable Python jobs with per-page checkpoints, bounded admission, deduplication and resumable artifact downloads. Delegated: multi-file implementation triggers.
-- [ ] S4: Continuously drained PostgreSQL jobs with leases, bounded retries and page progress; additive migration V13 after complete inventory check. Delegated: multi-file/isolated integration triggers.
+- [x] S4: Continuously drained PostgreSQL jobs with leases, bounded retries and page progress; additive migration V13 after complete inventory check. Delegated: multi-file/isolated integration triggers.
 - [ ] S5: Existing document view shows actual N/M page and phase progress without new routes; polling/retry cleanup tests. Delegated: multi-file UI triggers.
 - [ ] S6: Synthetic baseline/candidate benchmark, resource measurements and conservative verified CPU settings; no unmeasured speedup claim. Delegated: execution and model-runtime verification triggers.
 
@@ -39,9 +39,9 @@ Deliver large searchable PDFs without Base64 response expansion, process long do
 - Required failed/skipped/unavailable checks recorded honestly; authenticated user-document upload not assumed.
 
 ## Progress
-- S1 committed as 5321588 and independently verified. S2 committed 9d3969a; parent repeated 46 isolated Python tests GREEN. Native main..HEAD medium, 3063 lines, review_due=false/under_budget; boundary main pending. Neither candidate deployed live. S3 implemented and self-verified; parent check, commit and activation pending. No S4-S6 work.
+- S1 committed as 5321588 and independently verified. S2 committed 9d3969a; parent repeated 46 isolated Python tests GREEN. Native main..HEAD medium, 3063 lines, review_due=false/under_budget; boundary main pending. Neither candidate deployed live. S3 committed b5e9b36; parent repeated 70 Python tests GREEN. Native main..HEAD medium4192lines, review_due=false/under_budget, boundary main pending. S4 implemented/self-verified; parent verification/commit/activation pending. S5/S6 untouched, no live deployment.
 - Operational prior recovery and backup: see OCR.md and odd/tasks/ocr-image-upload.md.
-- S4-S6 remain unimplemented. Implementation checkboxes do not authorize commit, review or deployment.
+- S5/S6 remain unimplemented. Implementation checkboxes do not authorize commit, review or deployment.
 
 ## S1 evidence and recovery
 - Route: delegated direct (multi-file/preparation/execution triggers). Exact additional authorized surface: `ocr_service/Dockerfile`, solely copying `artifact_store.py` before app/model initialization.
@@ -81,7 +81,7 @@ docker run --rm --network none --mount "type=bind,source=$PWD/ocr_service,target
 
 
 ## S3 evidence and recovery
-- Route: delegated direct (multi-file/preparation/execution). Implementation and self-verification complete; parent verification, work-unit commit/native assessment and activation pending. No S4 Java integration or migration.
+- Route: delegated direct (multi-file/preparation/execution). S3 committed b5e9b36; parent 70 Python tests GREEN. Native medium4192lines, review_due=false/under_budget, boundary main pending; no approval implied. Activation pending. S4 Java integration now follows below.
 - Ownership: one lifespan-owned, non-daemon Python worker with explicit stop/join and a single shared processing lock. No Redis/Celery/database/new dependency. Queued/running jobs resume from the private jobs subdirectory of the existing artifact volume. Dockerfile copies job_store.py; Compose volume/mount unchanged.
 - Identity: caller supplies independent random 32-hex job ID and 64-hex capability; server stores only its SHA-256 hash and uses constant-time comparison. Submission verifies source SHA-256 and server engine/config fingerprint (package versions, actual selected ONNX model hashes, rendering limits/DPI and overlay version). Same ID/source/config is idempotent; mismatch is refused. No client filenames/paths are persisted.
 - Admission: one bounded upload/preflight at a time, at most eight durable jobs and 32 combined artifact/job slots, with full input + 128 MiB output + 16 MiB checkpoint/result reservation per job, jointly enforced against legacy artifact bytes under the same lock and 512 MiB quota. Thus default quota admits approximately three full-size jobs, not an unlimited queue. Smaller configured artifact bounds are respected. Private manifests are bounded to 4 KiB each; atomic writes may additionally hold their bounded temporary manifest. Checkpoints are at most 256 KiB/page, 100 pages, and checkpoints plus result metadata together fit 16 MiB. Originals remain <=25 MiB, page/pixel bounds unchanged.
@@ -102,3 +102,37 @@ docker run --rm --network none --mount "type=bind,source=$PWD/ocr_service,target
 
 - Intermediate invocation failed NameError because the storage wrapper was inadvertently applied before its declaration; corrected before the final 70-test GREEN. This tooling/edit error is not behavioral RED. Final git diff --check and structural readback passed.
 - Authored S3 change count: 1111 functional/test lines, 1159 including docs (additions plus deletions, generated files excluded). Coherent review units are durable store/admission/recovery, and lifespan/API/page-checkpoint integration with their tests; shared ownership/publication contracts justify exceeding advisory 400 lines without artificial splits.
+
+
+## S4 evidence and recovery
+- Route: delegated direct (multi-file/SQL/verification). Scope is Java durable scheduling, safe progress DTO and additive V13 only; Python S3 contract unchanged. Parent verification/commit/native assessment and live activation remain pending.
+- Queue: PostgreSQL PENDIENTE/PROCESANDO rows are authoritative. One-row CTE claim uses FOR UPDATE SKIP LOCKED, owner/expiry and retry due time; no Async document queue or bulk startup reset. A two-thread scheduler supports one synchronous drain plus independent ten-second heartbeat during HTTP/download; default polling 2000ms (minimum500), lease120s (30..600). Existing global Async enablement retained for compatibility; no OCR executor queue.
+- Identity: private stable random job ID/capability/fingerprint persisted before submitting; source hash checked against actual bounded bytes, server confirms configuration. GET/poll and repeated POST use the same identity; remote404 after confirmed submission is terminal expiry, never silent inference replay. Transport timeouts/admission/5xx/429 and database availability get at most five automatic retries with 2/4/8/16/32-second delays; malformed/source/config/terminal remote errors are not retried automatically. Historical ERROR rows are never claimed. An explicit retry locks the row, refuses PENDING/PROCESSING duplicates, clears old identity and fences stale workers; old remote cancellation is after commit.
+- Time: lease, eligibility, publication fence and next-retry deadlines all use PostgreSQL CURRENT_TIMESTAMP and intervals, avoiding Java/database timezone skew. Persisted timestamp response fields follow existing LocalDateTime conventions; UI should not assume a UTC suffix or invent a countdown.
+- Publication: every identity/progress/error/result write requires current owner, live lease and current job ID (null-aware before initialization). Unique new private PDF is downloaded/validated before a repository transaction atomically publishes its path/text/layout/status. Repository commit returns before old useful PDF cleanup and remote acknowledgement. Zero-row stale/deleted publication discards only the new PDF; acknowledgement failure logs a static warning and cannot undo success. Cleanup/cancellation are best-effort with static diagnostics; source originals and old useful PDFs remain intact on download/publication failure.
+- Deletion: document deletion now takes the same row lock so a concurrent publication cannot create an unreferenced derived PDF after a stale deletion snapshot. Original/private-file cleanup and best-effort remote cancellation run only after the deletion commits. Additional exact authorized test surface: service/DocumentoImageBatchServiceTest.java, only deletion lock fixture and after-commit cancellation assertions; original rollback regression preserved.
+- Public S5 contract: nullable ocrPaginasProcesadas (confirmed pages), ocrPaginasTotales (total pages), ocrFase (QUEUED/RECOGNIZING/EXPORTING/RETRY_WAIT/COMPLETED/ERROR), ocrProximoReintento (existing-style LocalDateTime). No job ID/capability/fingerprint/lease owner in DTO; private entity transport fields also JsonIgnore. Legacy rutaAlmacenamiento response field is retained but now null, never an internal path; public download routes remain unchanged.
+- Migration: numeric inventory V1-V12 unique and V13 absent immediately before authoring V13__ocr_jobs_progress.sql; final inventory V1-V13 unique. Eleven nullable columns plus partial queue index; no original-data rewrite or production schema write. Before activation, take a fresh production backup and stop the old backend so mixed-version writers cannot overlap. Do not drop columns/volume to roll back; private active identities must be retained/drained.
+- TDD RED: the exact focused command observed two failed assertions on the old implementation (startup resets PROCESSING, manual retry duplicates PENDING), with 36 existing tests passing. Fresh clean GREEN focused command passed 64 tests (46 client, 12 worker, 6 scheduler), zero failures/errors/skips:
+
+```powershell
+.\mvnw.cmd "-Dtest=OcrClientTest,OcrWorkerTest,OcrQueueSchedulerTest" clean test
+```
+
+- Real isolated PostgreSQL/JPA proof: six tests GREEN, zero failures/errors/skips, 23.09 seconds (26.843-second runner). Actual repository proxy/transactions, not SQL copies: 150 pending rows drain while historical ERROR untouched; competing claims exactly one winner; live lease preserved/expired recovered; owner/job/manual-retry/deletion publication fences; durable progress/backoff and failure before identity; database-clock delay assertions.
+
+```powershell
+.\mvnw.cmd "-Dtest=OcrQueueIntegrationTest" "-Docr.test.integration=true" "-Docr.test.db-url=jdbc:postgresql://127.0.0.1:55439/ocr_s4_isolated" "-DargLine=-Djdk.net.unixdomain.tmpdir=C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/selector-probe-do-not-create" test
+```
+
+- Isolated fixture: PostgreSQL17.11, loopback55439, database ocr_s4_isolated, dedicated synthetic credentials, ownership marker owned-by-ocr-s4-only. Test validates exact URL/database/marker before schema writes and is disabled unless explicitly requested. Container a6207650184d5fa36f64de696a1333f730028854817794bb95572040d769a845, label com.archivo.ocr.test=s4-isolated, tmpfs database; removed only after exact ID/label check. No production connection, migration, reset or volume touched; no test threads/container remain.
+- Expanded final clean mocked controller/image/storage suite: 90 tests GREEN, zero failures/errors/skips (46 client, 12 worker, 6 scheduler, 16 image batch, 5 controller, 5 storage), 40.755-second runner:
+
+```powershell
+.\mvnw.cmd "-Dtest=OcrClientTest,OcrWorkerTest,OcrQueueSchedulerTest,DocumentoImageBatchServiceTest,DocumentoDigitalControllerTest,FileSystemStorageServiceTest" clean test
+```
+
+- Intermediate checks: two unresolved-compilation errors from an over-broad Resource matcher replacement and one rollback-fixture cancellation assertion error were corrected; they are not behavioral RED. Fresh javac clean verification avoids editor-generated problem classfiles. No new dependency or POM changes.
+- Skipped/pending: production backup/V13 application/restart, full authenticated live backend-to-Python flow, real restart/power-loss fault injection, S5 UI/S6 benchmark, unscoped full Maven suite (may contain live-database tests). Isolated minimal schema validates V13/native fences, not the complete production Flyway history or live schema compatibility. Source normalization UTF-8/LF precedes final functional proof; final git diff --check and structural readback passed. Local Engram mirror remains pending ambiguity/no-save request.
+
+- Authored S4 count: 982 functional/test lines, 1038 including documentation, 21 files (additions plus deletions; generated files excluded). Coherent review units: DB claim/lease/progress/manual lifecycle with migration and real SQL tests; durable client/publication/acknowledgement boundary with its regressions. Shared fencing and recovery contracts justify exceeding advisory400 without splitting tests away. S4 commit pending parent; review boundary main unchanged.

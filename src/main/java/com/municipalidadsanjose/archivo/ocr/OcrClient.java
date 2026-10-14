@@ -27,6 +27,7 @@ public class OcrClient {
     private final URI pdfEndpoint;
     private final URI imageBatchEndpoint;
     private final URI artifactEndpoint;
+    private final URI jobsEndpoint;
     private final long maxArtifactBytes;
     private static final int MAX_METADATA_BYTES = 16 * 1024 * 1024;
 
@@ -45,6 +46,7 @@ public class OcrClient {
         this.pdfEndpoint = URI.create(root + "/pdf");
         this.imageBatchEndpoint = URI.create(root + "/images/pdf");
         this.artifactEndpoint = URI.create(root + "/v2/artifacts/");
+        this.jobsEndpoint = URI.create(root + "/v2/jobs/");
         this.maxArtifactBytes = Math.min(maxArtifactBytes, 128L * 1024 * 1024);
         if (this.maxArtifactBytes < 5) throw new IllegalArgumentException("Invalid artifact size limit");
         var factory = new SimpleClientHttpRequestFactory() {
@@ -198,6 +200,117 @@ public class OcrClient {
         throw failure("OCR_ARTIFACT_DOWNLOAD_FAILED", null, "No se pudo descargar el PDF OCR.", null);
     }
 
+    public String engineFingerprint() {
+        var result = jobJson(httpClient.get().uri(jobsEndpoint.resolve("config")), null, Config.class);
+        if (result == null || result.engineFingerprint() == null || !result.engineFingerprint().matches("[a-f0-9]{64}")) {
+            throw failure("OCR_JOB_METADATA_INVALID", null, "El servicio OCR devolvió una configuración inválida.", null);
+        }
+        return result.engineFingerprint();
+    }
+
+    public record Config(String engineFingerprint, long maxInputBytes, int maxPages) { }
+
+    public OcrJobStatus consultarJob(String id, String capability) {
+        validateJobIdentity(id, capability);
+        return validateStatus(jobJson(httpClient.get().uri(jobsEndpoint.resolve(id))
+                .header("X-Job-Capability", capability), id, OcrJobStatus.class), id);
+    }
+
+    public OcrJobStatus enviarJob(String id, String capability, String fingerprint, String sha256, Resource source) {
+        validateJobIdentity(id, capability);
+        if (fingerprint == null || !fingerprint.matches("[a-f0-9]{64}") || sha256 == null || !sha256.matches("[a-f0-9]{64}")) {
+            throw failure("OCR_JOB_IDENTITY_INVALID", id, "La identidad del trabajo OCR no es válida.", null);
+        }
+        try {
+            byte[] data;
+            try (var input = source.getInputStream()) { data = input.readNBytes(25 * 1024 * 1024 + 1); }
+            if (data.length == 0 || data.length > 25 * 1024 * 1024) {
+                throw failure("OCR_INPUT_LIMIT", id, "El archivo supera el límite de transferencia.", null);
+            }
+            String actual = java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data));
+            if (!actual.equals(sha256)) throw failure("OCR_INPUT_HASH", id, "El archivo original no coincide con su hash guardado.", null);
+            return validateStatus(jobJson(httpClient.post().uri(jobsEndpoint.resolve(id))
+                    .contentType(MediaType.APPLICATION_OCTET_STREAM).header("X-Job-Capability", capability)
+                    .header("X-Source-SHA256", sha256).header("X-OCR-Fingerprint", fingerprint).body(data), id,
+                    OcrJobStatus.class), id);
+        } catch (IOException error) {
+            throw failure("OCR_INPUT_READ_FAILED", id, "No se pudo leer el original para el OCR.", error);
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 unavailable");
+        }
+    }
+
+    public OcrResultado resultadoJob(String id, String capability) {
+        validateJobIdentity(id, capability);
+        var result = jobJson(httpClient.get().uri(jobsEndpoint.resolve(id + "/result"))
+                .header("X-Job-Capability", capability), id, OcrResultado.class);
+        if (result == null || result.pdfBase64() != null || result.layout() == null || result.pages() < 1 || result.pages() > 100) {
+            throw failure("OCR_JOB_METADATA_INVALID", id, "El servicio OCR devolvió un resultado inválido.", null);
+        }
+        validateArtifact(result.artifact());
+        if (!id.equals(result.artifact().id()) || !capability.equals(result.artifact().capability())) {
+            throw failure("OCR_JOB_IDENTITY_INVALID", id, "El artefacto no corresponde al trabajo OCR.", null);
+        }
+        return result;
+    }
+
+    public void cancelarJob(String id, String capability) { deleteJob(id, capability, false); }
+    public void confirmarJob(String id, String capability) { deleteJob(id, capability, true); }
+
+    private void deleteJob(String id, String capability, boolean completed) {
+        validateJobIdentity(id, capability);
+        jobJson(httpClient.delete().uri(jobsEndpoint.resolve(id + (completed ? "/result" : "")))
+                .header("X-Job-Capability", capability), id, null);
+    }
+
+    private void validateJobIdentity(String id, String capability) {
+        if (id == null || !id.matches("[a-f0-9]{32}") || capability == null || !capability.matches("[a-f0-9]{64}")) {
+            throw failure("OCR_JOB_IDENTITY_INVALID", null, "La identidad del trabajo OCR no es válida.", null);
+        }
+    }
+
+    private OcrJobStatus validateStatus(OcrJobStatus status, String id) {
+        if (status == null || !id.equals(status.id()) || status.pages() < 1 || status.pages() > 100
+                || status.completedPages() < 0 || status.completedPages() > status.pages()
+                || status.state() == null || status.phase() == null
+                || !java.util.Set.of("QUEUED", "RUNNING", "COMPLETED", "ERROR", "CANCELLED").contains(status.state())
+                || !java.util.Set.of("QUEUED", "RECOGNIZING", "EXPORTING", "COMPLETED", "ERROR", "CANCELLED").contains(status.phase())
+                || "COMPLETED".equals(status.state()) && status.completedPages() != status.pages()
+                || status.errorCode() != null && !status.errorCode().matches("OCR_[A-Z_]{1,60}")) {
+            throw failure("OCR_JOB_METADATA_INVALID", id, "El servicio OCR devolvió progreso inválido.", null);
+        }
+        return status;
+    }
+
+    private <T> T jobJson(RestClient.RequestHeadersSpec<?> request, String id, Class<T> type) {
+        try {
+            byte[] data = request.exchange((outgoing, reply) -> {
+                if (type == null && reply.getStatusCode().value() == 404) return new byte[0];
+                checkStatus(reply);
+                if (type == null) return new byte[0];
+                long size = reply.getHeaders().getContentLength();
+                var media = reply.getHeaders().getContentType();
+                if (size > MAX_METADATA_BYTES || media == null || !MediaType.APPLICATION_JSON.isCompatibleWith(media)) {
+                    throw failure("OCR_JOB_METADATA_INVALID", id, "El servicio OCR devolvió metadatos inválidos.", null);
+                }
+                byte[] body = reply.getBody().readNBytes(MAX_METADATA_BYTES + 1);
+                if (body.length > MAX_METADATA_BYTES || size >= 0 && size != body.length) {
+                    throw failure("OCR_JOB_METADATA_INVALID", id, "El servicio OCR devolvió metadatos fuera del límite.", null);
+                }
+                return body;
+            });
+            return type == null ? null : objectMapper.readValue(data, type);
+        } catch (OcrFailure error) {
+            throw error;
+        } catch (RestClientResponseException error) {
+            throw failure("OCR_JOB_HTTP_" + error.getStatusCode().value(), id, "El servicio OCR no pudo atender el trabajo.", null);
+        } catch (ResourceAccessException error) {
+            throw failure("OCR_JOB_CONNECTION", id, "No se pudo comunicar con el servicio OCR.", null);
+        } catch (RestClientException | tools.jackson.core.JacksonException error) {
+            throw failure("OCR_JOB_METADATA_INVALID", id, "El servicio OCR devolvió una respuesta inválida.", null);
+        }
+    }
+
     private void validateArtifact(OcrResultado.Artifact artifact) {
         if (artifact == null || artifact.id() == null || !artifact.id().matches("[a-f0-9]{32}")
                 || artifact.capability() == null || !artifact.capability().matches("[a-f0-9]{64}")
@@ -236,6 +349,10 @@ public class OcrClient {
         }
         public String code() { return code; }
         public String requestId() { return requestId; }
+        public boolean transientFailure() {
+            return code.equals("OCR_JOB_CONNECTION") || code.equals("OCR_ARTIFACT_DOWNLOAD_FAILED")
+                    || code.matches("OCR_JOB_HTTP_(408|425|429|5[0-9]{2})");
+        }
     }
 
     private IllegalStateException serviceFailure(RestClientResponseException error) {

@@ -2,23 +2,22 @@ package com.municipalidadsanjose.archivo.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.EnableAsync;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-
-import java.util.concurrent.Executor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 @Configuration
+@EnableScheduling
 @EnableAsync
 public class OcrAsyncConfig {
-
-    @Bean(name = "ocrExecutor")
-    public Executor ocrExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(2);
-        executor.setQueueCapacity(100);
-        executor.setThreadNamePrefix("ocr-");
-        executor.initialize();
-        return executor;
+    @Bean
+    public ThreadPoolTaskScheduler taskScheduler() {
+        var scheduler = new ThreadPoolTaskScheduler();
+        // One continuous drain and one independent heartbeat, never an in-memory document queue.
+        scheduler.setPoolSize(2);
+        scheduler.setThreadNamePrefix("ocr-schedule-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(310);
+        return scheduler;
     }
 }

@@ -95,6 +95,45 @@ public class DocumentoDigital {
     @Column(name = "ocr_version", nullable = false)
     private long ocrVersion;
 
+
+    // Private durable transport/lease fields never belong in response DTOs.
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "ocr_job_id", length = 32)
+    private String ocrJobId;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "ocr_job_capability", length = 64)
+    private String ocrJobCapability;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "ocr_engine_fingerprint", length = 64)
+    private String ocrEngineFingerprint;
+
+    @Column(name = "ocr_job_submitted")
+    private Boolean ocrJobSubmitted;
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "ocr_lease_owner", length = 32)
+    private String ocrLeaseOwner;
+
+    @Column(name = "ocr_lease_expires_at")
+    private LocalDateTime ocrLeaseExpiresAt;
+
+    @Column(name = "ocr_next_retry_at")
+    private LocalDateTime ocrNextRetryAt;
+
+    @Column(name = "ocr_retries")
+    private Integer ocrRetries;
+
+    @Column(name = "ocr_paginas_procesadas")
+    private Integer ocrPaginasProcesadas;
+
+    @Column(name = "ocr_paginas_totales")
+    private Integer ocrPaginasTotales;
+
+    @Column(name = "ocr_fase", length = 30)
+    private String ocrFase;
+
     // ocr_tsv NO se mapea: es una columna TSVECTOR que Postgres recalcula solo
     // (trigger trg_documento_ocr_tsv) a partir de ocr_texto. La app nunca la
     // lee ni la escribe directamente; la búsqueda full-text se hace con un

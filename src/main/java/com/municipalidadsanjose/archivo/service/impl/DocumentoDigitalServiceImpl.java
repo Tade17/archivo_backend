@@ -135,7 +135,7 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
     @Transactional
     @Auditable(entidad = "DocumentoDigital", accion = AccionAuditoria.ELIMINAR)
     public void eliminar(UUID id) {
-        DocumentoDigital documento = documentoDigitalRepository.findById(id)
+        DocumentoDigital documento = documentoDigitalRepository.findLockedById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", id));
         var paths = new java.util.ArrayList<String>();
         paths.add(documento.getRutaAlmacenamiento());
@@ -149,7 +149,10 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         }
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
-            public void afterCommit() { DocumentoImageBatchService.cleanup(fileStorageService, paths); }
+            public void afterCommit() {
+                DocumentoImageBatchService.cleanup(fileStorageService, paths);
+                ocrService.cancelarRemoto(documento.getOcrJobId(), documento.getOcrJobCapability());
+            }
         });
         documentoDigitalRepository.delete(documento);
     }
