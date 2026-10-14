@@ -156,6 +156,59 @@ public class FileSystemStorageService implements FileStorageService {
         }
     }
 
+    @Override
+    public String guardarPdfStream(String subcarpeta, java.io.InputStream contenido,
+                                   long expectedBytes, String sha256, long maxBytes) {
+        long limit = Math.min(maxBytes, 128L * 1024 * 1024);
+        if (contenido == null || expectedBytes < 5 || expectedBytes > limit
+                || sha256 == null || !sha256.matches("[a-f0-9]{64}")) {
+            throw new IllegalStateException("El PDF derivado no cumple los límites de transferencia.");
+        }
+        Path directory = baseDir.resolve(subcarpeta).normalize();
+        if (!directory.startsWith(baseDir)) throw new IllegalStateException("Destino de PDF inválido.");
+        Path partial = null;
+        try {
+            for (Path path = directory; path != null && path.startsWith(baseDir); path = path.getParent()) {
+                if (Files.isSymbolicLink(path)) throw new IOException("Unsafe storage link");
+            }
+            Files.createDirectories(directory);
+            if (!directory.toRealPath().startsWith(baseDir.toRealPath())) throw new IOException("Unsafe storage destination");
+            partial = Files.createTempFile(directory, "artifact-", ".part");
+            var digest = MessageDigest.getInstance("SHA-256");
+            long actualBytes = 0;
+            try (var input = new DigestInputStream(contenido, digest);
+                 var output = Files.newOutputStream(partial)) {
+                byte[] signature = input.readNBytes(5);
+                if (!Arrays.equals(signature, "%PDF-".getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
+                    throw new IOException("Invalid PDF signature");
+                }
+                output.write(signature);
+                actualBytes = signature.length;
+                byte[] buffer = new byte[64 * 1024];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    actualBytes += count;
+                    if (actualBytes > limit || actualBytes > expectedBytes) throw new IOException("PDF size limit");
+                    output.write(buffer, 0, count);
+                }
+            }
+            if (actualBytes != expectedBytes || !MessageDigest.isEqual(digest.digest(), HexFormat.of().parseHex(sha256))) {
+                throw new IOException("PDF integrity mismatch");
+            }
+            Path published = directory.resolve(UUID.randomUUID() + "-ocr.pdf");
+            Files.move(partial, published, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            partial = null;
+            return baseDir.relativize(published).toString().replace('\\', '/');
+        } catch (IOException | NoSuchAlgorithmException error) {
+            throw new IllegalStateException("No se pudo guardar íntegramente el PDF derivado.", error);
+        } finally {
+            if (partial != null) {
+                try { Files.deleteIfExists(partial); }
+                catch (IOException error) { throw new IllegalStateException("No se pudo limpiar la transferencia parcial del PDF.", error); }
+            }
+        }
+    }
+
     private String extensionDe(String nombreOriginal) {
         if (nombreOriginal == null) {
             return "";

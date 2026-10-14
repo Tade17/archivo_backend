@@ -29,6 +29,13 @@ services:
       OCR_MAX_BYTES: "26214400"
       OCR_MAX_PAGES: "100"
       OCR_PDF_DPI: "220"
+      OCR_ARTIFACT_DIR: "/var/lib/archivo-ocr/artifacts"
+      OCR_ARTIFACT_MAX_BYTES: "134217728"
+      OCR_ARTIFACT_TOTAL_BYTES: "536870912"
+      OCR_ARTIFACT_MAX_COUNT: "32"
+      OCR_ARTIFACT_TTL_SECONDS: "3600"
+    volumes:
+      - archivo_ocr_artifacts:/var/lib/archivo-ocr/artifacts
     ports:
       # Configurable con OCR_HOST_PORT en un .env local si el 8091 choca con
       # el rango de puertos que Windows reserva dinámicamente en esa máquina
@@ -46,3 +53,4 @@ services:
 # sí, si en algún momento se quiere arrancar de cero.
 volumes:
   archivo_postgres_data:
+  archivo_ocr_artifacts:

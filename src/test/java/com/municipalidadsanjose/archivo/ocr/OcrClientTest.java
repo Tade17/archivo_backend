@@ -24,6 +24,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.*;
 
 class OcrClientTest {
+    @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory;
     private final ByteArrayResource file = new ByteArrayResource(new byte[]{1, 2, 3});
     private MockRestServiceServer server;
 
@@ -32,7 +33,7 @@ class OcrClientTest {
         server = MockRestServiceServer.bindTo(builder).build();
         var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
         ReflectionTestUtils.setField(client, "httpClient", builder.build());
-        server.expect(requestTo("http://localhost:8091/" + (pdf ? "pdf" : "ocr"))).andRespond(response);
+        server.expect(requestTo("http://localhost:8091/" + (pdf ? "pdf" : "v2/ocr"))).andRespond(response);
         return client;
     }
 
@@ -105,7 +106,7 @@ class OcrClientTest {
     @ValueSource(booleans = {false, true})
     void successfulResponseIsPreserved(boolean pdf) {
         var client = client(pdf, withSuccess(pdf ? "%PDF-derived" :
-                "{\"text\":\"recognized\",\"confidence\":0.9,\"pages\":1,\"lines\":1,\"model\":\"test\",\"layout\":[],\"pdfBase64\":\"\"}",
+                "{\"text\":\"recognized\",\"confidence\":0.9,\"pages\":1,\"lines\":1,\"model\":\"test\",\"layout\":[],\"artifact\":{\"id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"capability\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"sizeBytes\":8,\"sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}",
                 pdf ? MediaType.APPLICATION_PDF : MediaType.APPLICATION_JSON));
         if (pdf) {
             assertArrayEquals("%PDF-derived".getBytes(java.nio.charset.StandardCharsets.UTF_8),
@@ -188,5 +189,120 @@ class OcrClientTest {
         var oversized = new ByteArrayResource(new byte[20 * 1024 * 1024 + 1]);
         var error = assertThrows(IllegalStateException.class, () -> client.unirImagenes(List.of(oversized)));
         assertTrue(error.getMessage().contains("tamaño permitido"));
+    }
+
+    @Test
+    void v2MetadataFitsConstrainedReaderWithoutPdfBase64() {
+        var factory = tools.jackson.core.json.JsonFactory.builder().streamReadConstraints(
+                tools.jackson.core.StreamReadConstraints.builder().maxStringLength(128).build()).build();
+        var mapper = tools.jackson.databind.json.JsonMapper.builder(factory).build();
+        assertThrows(tools.jackson.core.exc.StreamConstraintsException.class, () -> mapper.readValue(
+                "{\"pdfBase64\":\"" + "x".repeat(512) + "\"}", OcrResultado.class));
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OcrClient(mapper, "http://localhost:8091", 10);
+        ReflectionTestUtils.setField(client, "httpClient", builder.build());
+        String metadata = "{\"text\":\"recognized\",\"confidence\":0.9,\"pages\":1,\"lines\":1,\"model\":\"test\",\"layout\":[],"
+                + "\"artifact\":{\"id\":\"" + "a".repeat(32) + "\",\"capability\":\"" + "b".repeat(64)
+                + "\",\"sizeBytes\":8,\"sha256\":\"" + "c".repeat(64) + "\"},\"requestId\":\"" + "d".repeat(32) + "\"}";
+        server.expect(requestTo("http://localhost:8091/v2/ocr")).andRespond(withSuccess(metadata, MediaType.APPLICATION_JSON));
+        var result = client.reconocer(file, "application/pdf", "test.pdf");
+        assertNull(result.pdfBase64());
+        assertNotNull(result.artifact());
+        assertEquals(8, result.artifact().sizeBytes());
+        assertTrue(result.requestId().matches("[a-f0-9]{32}"));
+        server.verify();
+    }
+
+    private OcrClient binaryClient() {
+        var builder = RestClient.builder();
+        server = MockRestServiceServer.bindTo(builder).build();
+        var client = new OcrClient(new ObjectMapper(), "http://localhost:8091", 10);
+        ReflectionTestUtils.setField(client, "httpClient", builder.build());
+        return client;
+    }
+
+    private OcrResultado.Artifact descriptor(byte[] pdf) throws Exception {
+        return new OcrResultado.Artifact("a".repeat(32), "b".repeat(64), pdf.length,
+                java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(pdf)));
+    }
+
+    private com.municipalidadsanjose.archivo.storage.FileSystemStorageService binaryStorage() {
+        return new com.municipalidadsanjose.archivo.storage.FileSystemStorageService(directory.toString(), 20 * 1024 * 1024, "application/pdf");
+    }
+
+    @Test
+    void retainedArtifactDownloadRetriesWithoutRecognition() throws Exception {
+        var client = binaryClient();
+        byte[] pdf = "%PDF-test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var artifact = descriptor(pdf);
+        server.expect(requestTo("http://localhost:8091/v2/artifacts/" + artifact.id()))
+                .andExpect(org.springframework.test.web.client.match.MockRestRequestMatchers.header("X-Artifact-Capability", artifact.capability()))
+                .andRespond(withException(new SocketTimeoutException("synthetic timeout")));
+        server.expect(requestTo("http://localhost:8091/v2/artifacts/" + artifact.id()))
+                .andRespond(withSuccess(pdf, MediaType.APPLICATION_PDF).header("Content-Length", String.valueOf(pdf.length)));
+        var storage = binaryStorage();
+        String path = client.descargarPdf(artifact, storage, "exp");
+        assertArrayEquals(pdf, storage.cargarComoRecurso(path).getContentAsByteArray());
+        server.verify();
+    }
+
+    @Test
+    void artifactHeadersMustMatchMetadataBeforeStorage() throws Exception {
+        var client = binaryClient();
+        byte[] pdf = "%PDF-test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var artifact = descriptor(pdf);
+        server.expect(requestTo("http://localhost:8091/v2/artifacts/" + artifact.id()))
+                .andRespond(withSuccess(pdf, MediaType.TEXT_PLAIN).header("Content-Length", String.valueOf(pdf.length)));
+        var storage = org.mockito.Mockito.mock(com.municipalidadsanjose.archivo.storage.FileStorageService.class);
+        assertThrows(OcrClient.OcrFailure.class, () -> client.descargarPdf(artifact, storage, "exp"));
+        org.mockito.Mockito.verifyNoInteractions(storage);
+        server.verify();
+    }
+
+    @Test
+    void artifactLengthMismatchIsRejectedBeforeStorage() throws Exception {
+        var client = binaryClient();
+        byte[] pdf = "%PDF-test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var artifact = descriptor(pdf);
+        server.expect(requestTo("http://localhost:8091/v2/artifacts/" + artifact.id()))
+                .andRespond(withSuccess(pdf, MediaType.APPLICATION_PDF).header("Content-Length", String.valueOf(pdf.length + 1)));
+        var storage = org.mockito.Mockito.mock(com.municipalidadsanjose.archivo.storage.FileStorageService.class);
+        assertThrows(OcrClient.OcrFailure.class, () -> client.descargarPdf(artifact, storage, "exp"));
+        org.mockito.Mockito.verifyNoInteractions(storage);
+        server.verify();
+    }
+
+    @Test
+    void rejectsInvalidOrOversizedArtifactBeforeNetworkAccess() {
+        var client = binaryClient();
+        var storage = binaryStorage();
+        for (var artifact : List.of(new OcrResultado.Artifact("../outside", "b".repeat(64), 9, "c".repeat(64)),
+                new OcrResultado.Artifact("a".repeat(32), "b".repeat(64), 128L * 1024 * 1024 + 1, "c".repeat(64)))) {
+            assertThrows(OcrClient.OcrFailure.class, () -> client.descargarPdf(artifact, storage, "exp"));
+        }
+        server.verify();
+    }
+
+    @Test
+    void rejectsExcessMetadataContentLengthBeforeAllocation() {
+        var client = binaryClient();
+        server.expect(requestTo("http://localhost:8091/v2/ocr"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON).header("Content-Length", String.valueOf(16 * 1024 * 1024 + 1)));
+        var error = assertThrows(OcrClient.OcrFailure.class, () -> client.reconocer(file, "application/pdf", "test.pdf"));
+        assertEquals("OCR_METADATA_INVALID", error.code());
+        assertNotNull(error.requestId());
+        server.verify();
+    }
+
+    @Test
+    void capabilityDownloadRejectsRedirectResponse() throws Exception {
+        var client = binaryClient();
+        byte[] pdf = "%PDF-test".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        var artifact = descriptor(pdf);
+        server.expect(requestTo("http://localhost:8091/v2/artifacts/" + artifact.id()))
+                .andRespond(withStatus(HttpStatus.FOUND).header("Location", "http://untrusted.invalid/pdf"));
+        assertThrows(OcrClient.OcrFailure.class, () -> client.descargarPdf(artifact, binaryStorage(), "exp"));
+        server.verify();
     }
 }

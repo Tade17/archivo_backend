@@ -23,6 +23,36 @@ Despliegue de este cambio: reconstruir solo OCR y reiniciar el backend actualiza
 5. Se genera un PDF que conserva las páginas escaneadas y añade una capa Unicode de texto seleccionable y buscable. El backend guarda el PDF derivado y la distribución de los fragmentos; el archivo original y su hash se conservan.
 6. El backend guarda el resultado en `ocr_texto`; el trigger existente actualiza `ocr_tsv` para que el contenido pueda encontrarse desde Explorar.
 
+## Transporte binario v2: preparado, pendiente de despliegue
+
+El backend actualizado solicita `/v2/ocr`: recibe texto, distribución y una referencia pequeña del PDF, no una cadena Base64 del PDF completo. Después descarga el binario desde `/v2/artifacts/{id}` con una capacidad independiente en `X-Artifact-Capability`. No se aceptan direcciones de descarga proporcionadas por la respuesta ni redirecciones HTTP que puedan reenviar esa capacidad.
+
+El archivo descargado se publica atómicamente solo después de validar tipo PDF, firma, tamaño declarado y real, y SHA-256. Los archivos parciales se limpian; un PDF anterior útil se conserva hasta que la actualización del documento se confirma. Si falla una transferencia por E/S, se intenta descargar el mismo artefacto una vez más sin ejecutar de nuevo el reconocimiento.
+
+| Límite | Valor máximo |
+|---|---:|
+| Metadatos JSON | 16 MiB |
+| PDF derivado individual | 128 MiB |
+| Datos PDF en caché, incluidos parciales interrumpidos | 512 MiB |
+| Artefactos o reservas en caché | 32 |
+| Retención | 1 hora |
+
+Los manifiestos privados añaden un máximo acotado de 4 KiB por artefacto. Los valores configurados más bajos se respetan. La cuota no expulsa descargas activas; cuando se agota, se rechaza la admisión en lugar de borrar un artefacto válido. El límite de originales y del PDF combinado de imágenes sigue siendo 20 MB; 128 MiB se aplica únicamente al PDF OCR derivado.
+
+Al caducar, se deniegan nuevas descargas. La limpieza de artefactos caducados y parciales interrumpidos se realiza al admitir otro artefacto o reiniciar la caché; las descargas ya activas se conservan hasta terminar.
+
+La caché utiliza el volumen independiente `archivo_ocr_artifacts`. Identificadores y capacidades son aleatorios e independientes; la comparación de capacidades es de tiempo constante y los manifiestos almacenan solamente su hash. No se siguen enlaces simbólicos ni rutas aportadas por el cliente. No borrar volúmenes para actualizar el servicio. El diseño actual conserva un único worker de servicio OCR; recuperación durable de trabajos y puntos de control por página corresponden a tareas posteriores, no a este transporte.
+
+Los diagnósticos incluyen referencia, código, categoría de excepción, tamaños y duración, sin texto reconocido, nombres/rutas de documentos ni capacidades. No se aumentan globalmente los límites de Jackson. El HTTP 200 seguido de error de parseo observado es compatible con una cadena Base64 demasiado grande (reproducción sintética confirmada); no se conservó la excepción del documento original, por lo que su causa exacta todavía no está confirmada.
+
+### Orden de activación y compatibilidad
+
+1. Después de verificar y autorizar el despliegue, reconstruir únicamente OCR. Mantiene `/ocr`, `/pdf` y `/images/pdf` para clientes anteriores.
+2. Reiniciar el backend actualizado con el procedimiento operativo de este equipo indicado abajo. El cliente nuevo requiere `/v2/ocr`; no degrada a una respuesta Base64 grande.
+3. Verificar con un PDF sintético pequeño: metadatos acotados, descarga repetida idéntica y PDF con texto buscable. No reprocesar documentos históricos ni lanzar trabajos largos sin autorización.
+
+Solo se probó el candidato en contenedores efímeros aislados y pruebas Java sin base de datos. El OCR/backend que ya están en ejecución no se actualizaron durante S1. La página larga, la cola durable y la optimización medida siguen pendientes.
+
 ## Consulta del PDF reconocido
 
 El PDF está disponible en cuanto termina el procesamiento, incluso si la confianza es baja. No hay una aprobación manual obligatoria.

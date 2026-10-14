@@ -2,8 +2,12 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import os
+import re
 import threading
+import time
+import uuid
 from functools import lru_cache
 
 import numpy as np
@@ -12,6 +16,8 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from PIL import Image, ImageSequence, UnidentifiedImageError
 from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
 from searchable_pdf import build_pdf
+from artifact_store import ArtifactError, ArtifactStore
+from starlette.responses import StreamingResponse
 
 app = FastAPI(title="OCR Archivo Municipal", docs_url=None, redoc_url=None)
 
@@ -21,7 +27,14 @@ PDF_DPI = int(os.getenv("OCR_PDF_DPI", "220"))
 MAX_PIXELS = int(os.getenv("OCR_MAX_PIXELS", "250000000"))
 IMAGE_BATCH_MAX_BYTES = 20 * 1024 * 1024
 IMAGE_BATCH_MAX_FILES = 100
+MAX_ARTIFACT_BYTES = min(int(os.getenv("OCR_ARTIFACT_MAX_BYTES", "134217728")), 128 * 1024 * 1024)
+MAX_METADATA_BYTES = 16 * 1024 * 1024
+logger = logging.getLogger("archivo.ocr")
 _engine_lock = threading.Lock()
+
+
+class MetadataLimitError(ValueError):
+    pass
 
 
 @lru_cache(maxsize=1)
@@ -99,8 +112,16 @@ def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Im
     return pages
 
 
-def recognize(data: bytes, content_type: str, filename: str) -> dict:
+def recognize(data: bytes, content_type: str, filename: str, binary_pdf: bool = False) -> dict:
     pages = render_pages(data, content_type, filename)
+    try:
+        return _recognize_pages(pages, binary_pdf)
+    finally:
+        for page in pages:
+            page.close()
+
+
+def _recognize_pages(pages: list[Image.Image], binary_pdf: bool) -> dict:
     texts: list[str] = []
     weighted_score = 0.0
     weight = 0
@@ -139,15 +160,101 @@ def recognize(data: bytes, content_type: str, filename: str) -> dict:
             weight += line_weight
         total_lines += len(page_texts)
 
-    return {
+    pdf = build_pdf(pages, layout, PDF_DPI, max_output_bytes=MAX_ARTIFACT_BYTES if binary_pdf else None)
+    result = {
         "text": "\n".join(texts).strip(),
         "confidence": round(weighted_score / weight, 4) if weight else 0.0,
         "pages": len(pages),
         "lines": total_lines,
         "model": "PP-OCRv5 latin / ONNX Runtime",
         "layout": layout,
-        "pdfBase64": base64.b64encode(build_pdf(pages, layout, PDF_DPI)).decode("ascii"),
     }
+    if binary_pdf:
+        result["pdfBytes"] = pdf
+    else:
+        result["pdfBase64"] = base64.b64encode(pdf).decode("ascii")
+    return result
+
+
+@lru_cache(maxsize=1)
+def get_artifact_store() -> ArtifactStore:
+    return ArtifactStore(os.getenv("OCR_ARTIFACT_DIR", "/var/lib/archivo-ocr/artifacts"),
+                         max_bytes=MAX_ARTIFACT_BYTES,
+                         max_total_bytes=int(os.getenv("OCR_ARTIFACT_TOTAL_BYTES", "536870912")),
+                         max_count=int(os.getenv("OCR_ARTIFACT_MAX_COUNT", "32")),
+                         ttl_seconds=int(os.getenv("OCR_ARTIFACT_TTL_SECONDS", "3600")))
+
+
+@app.post("/v2/ocr")
+async def ocr_v2(request: Request, content_type: str = Header(default="application/octet-stream"),
+                 x_filename_base64: str | None = Header(default=None),
+                 x_request_id: str | None = Header(default=None)) -> Response:
+    request_id = x_request_id if isinstance(x_request_id, str) and re.fullmatch(r"[a-f0-9]{32}", x_request_id) else uuid.uuid4().hex
+    start = time.monotonic()
+    data = bytearray()
+    artifact = None
+    artifact_bytes = metadata_bytes = 0
+    try:
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > MAX_BYTES:
+                raise HTTPException(status_code=413, detail="OCR_INPUT_LIMIT")
+            data.extend(chunk)
+        if not data:
+            raise HTTPException(status_code=400, detail="OCR_INPUT_EMPTY")
+        result = await asyncio.to_thread(recognize, bytes(data), content_type,
+                                         decode_filename(x_filename_base64), True)
+        pdf = result.pop("pdfBytes")
+        artifact_bytes = len(pdf)
+        artifact = await asyncio.to_thread(get_artifact_store().put, pdf)
+        result.update({"artifact": artifact, "requestId": request_id})
+        payload = json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        metadata_bytes = len(payload)
+        if metadata_bytes > MAX_METADATA_BYTES:
+            raise MetadataLimitError()
+        logger.info(json.dumps({"event": "ocr_complete", "requestId": request_id,
+                    "inputBytes": len(data), "artifactBytes": len(pdf), "metadataBytes": len(payload),
+                    "pages": result["pages"], "durationMs": round((time.monotonic() - start) * 1000)}))
+        return Response(payload, media_type="application/json",
+                        headers={"Cache-Control": "private, no-store", "X-Request-ID": request_id})
+    except Exception as error:
+        if artifact is not None:
+            try:
+                get_artifact_store().discard(artifact["id"], artifact["capability"])
+            except ArtifactError:
+                logger.warning(json.dumps({"event": "artifact_cleanup_failed", "requestId": request_id}))
+        code = (error.code if isinstance(error, ArtifactError) else
+                "OCR_METADATA_LIMIT" if isinstance(error, MetadataLimitError) else "OCR_PROCESSING_FAILED")
+        logger.warning(json.dumps({"event": "ocr_failed", "requestId": request_id,
+                       "inputBytes": len(data), "artifactBytes": artifact_bytes, "metadataBytes": metadata_bytes,
+                       "code": code, "category": type(error).__name__,
+                       "durationMs": round((time.monotonic() - start) * 1000)}))
+        if isinstance(error, HTTPException):
+            error.headers = {"X-Request-ID": request_id}
+            raise
+        status = 503 if isinstance(error, ArtifactError) and error.code == "cache_busy" else 422
+        raise HTTPException(status_code=status, detail="OCR_PROCESSING_FAILED",
+                            headers={"X-Request-ID": request_id}) from error
+
+
+class ArtifactResponse(StreamingResponse):
+    def __init__(self, lease):
+        self.lease = lease
+        super().__init__(lease.chunks(), media_type="application/pdf",
+                         headers={"Content-Length": str(lease.size), "Cache-Control": "private, no-store"})
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self.lease.close()
+
+
+@app.get("/v2/artifacts/{artifact_id}")
+def download_artifact(artifact_id: str, x_artifact_capability: str | None = Header(default=None)) -> Response:
+    try:
+        return ArtifactResponse(get_artifact_store().open(artifact_id, x_artifact_capability))
+    except ArtifactError as error:
+        raise HTTPException(status_code=404, detail="OCR_ARTIFACT_UNAVAILABLE") from error
 
 
 @app.get("/health")

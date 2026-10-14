@@ -15,6 +15,9 @@ public interface FileStorageService {
 
     String guardarPdf(String subcarpeta, byte[] contenido);
 
+    String guardarPdfStream(String subcarpeta, java.io.InputStream contenido,
+                            long expectedBytes, String sha256, long maxBytes);
+
     // rutaRelativa es la que devolvió guardar(): relativa al directorio base.
     Resource cargarComoRecurso(String rutaRelativa);
 

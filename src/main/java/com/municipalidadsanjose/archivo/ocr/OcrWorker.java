@@ -15,6 +15,8 @@ import java.util.UUID;
 @Service
 public class OcrWorker {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(OcrWorker.class);
+
     private final DocumentoDigitalRepository documentos;
     private final FileStorageService storage;
     private final OcrClient client;
@@ -40,20 +42,27 @@ public class OcrWorker {
     public void procesar(UUID documentoId) {
         if (!enabled || documentos.marcarProcesando(documentoId, LocalDateTime.now()) == 0) return;
         String nuevaRuta = null;
+        String requestId = UUID.randomUUID().toString().replace("-", "");
+        long started = System.nanoTime();
+        long inputBytes = -1;
+        long artifactBytes = -1;
         try {
             DocumentoDigital documento = documentos.findById(documentoId)
                     .orElseThrow(() -> new IllegalStateException("El documento ya no existe"));
+            var original = storage.cargarComoRecurso(documento.getRutaAlmacenamiento());
+            inputBytes = original.contentLength();
             OcrResultado resultado = client.reconocer(
-                    storage.cargarComoRecurso(documento.getRutaAlmacenamiento()),
+                    original,
                     documento.getTipoMime(),
                     documento.getNombreArchivo());
 
-            if (resultado.layout() == null || resultado.pdfBase64() == null) {
-                throw new IllegalStateException("Actualiza el servicio OCR: debe generar el PDF y el texto posicionado.");
+            if (resultado.layout() == null || resultado.artifact() == null) {
+                throw new IllegalStateException("Actualiza el servicio OCR: debe proporcionar un PDF binario protegido.");
             }
+            if (resultado.requestId() != null && resultado.requestId().matches("[a-f0-9]{32}")) requestId = resultado.requestId();
+            artifactBytes = resultado.artifact().sizeBytes();
             String layoutJson = mapper.writeValueAsString(resultado.layout());
-            nuevaRuta = storage.guardarPdf(documento.getExpediente().getId().toString(),
-                    java.util.Base64.getDecoder().decode(resultado.pdfBase64()));
+            nuevaRuta = client.descargarPdf(resultado.artifact(), storage, documento.getExpediente().getId().toString());
 
             String texto = resultado.text() == null ? "" : resultado.text().trim();
             BigDecimal confianza = resultado.confidence() == null ? BigDecimal.ZERO : resultado.confidence();
@@ -73,19 +82,30 @@ public class OcrWorker {
                 storage.eliminar(nuevaRuta);
             } else if (documento.getRutaPdf() != null) {
                 try { storage.eliminar(documento.getRutaPdf()); } catch (RuntimeException ignored) {
-                    // La nueva versión ya está publicada; una limpieza fallida no invalida el PDF.
+                    log.warn("event=ocr_cleanup_failed requestId={} category={}", requestId, ignored.getClass().getSimpleName());
                 }
             }
             nuevaRuta = null;
+            log.info("event={} requestId={} inputBytes={} artifactBytes={} pages={} durationMs={}",
+                    actualizados > 0 ? "ocr_published" : "ocr_discarded", requestId, inputBytes,
+                    artifactBytes, resultado.pages(), (System.nanoTime() - started) / 1_000_000);
         } catch (Exception e) {
-            if (nuevaRuta != null) storage.eliminar(nuevaRuta);
-            documentos.marcarErrorOcr(documentoId, mensajeSeguro(e), LocalDateTime.now());
+            if (e instanceof OcrClient.OcrFailure failure && failure.requestId() != null) requestId = failure.requestId();
+            if (nuevaRuta != null) {
+                try { storage.eliminar(nuevaRuta); }
+                catch (RuntimeException cleanup) { log.warn("event=ocr_cleanup_failed requestId={} category={}", requestId, cleanup.getClass().getSimpleName()); }
+            }
+            String code = e instanceof OcrClient.OcrFailure failure ? failure.code() : "OCR_PROCESSING_FAILED";
+            log.warn("event=ocr_failed requestId={} code={} category={} inputBytes={} artifactBytes={} durationMs={}",
+                    requestId, code, exceptionCategory(e), inputBytes, artifactBytes, (System.nanoTime() - started) / 1_000_000);
+            documentos.marcarErrorOcr(documentoId, "No se pudo completar el OCR [" + code + "]. Referencia: " + requestId + ".", LocalDateTime.now());
         }
     }
 
-    private String mensajeSeguro(Exception error) {
-        String mensaje = error.getMessage();
-        if (mensaje == null || mensaje.isBlank()) mensaje = "El OCR no pudo procesar el documento.";
-        return mensaje.length() <= 1000 ? mensaje : mensaje.substring(0, 1000);
+    private String exceptionCategory(Throwable error) {
+        var visited = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<Throwable, Boolean>());
+        Throwable last = error;
+        while (last.getCause() != null && visited.add(last.getCause())) last = last.getCause();
+        return last.getClass().getSimpleName();
     }
 }
