@@ -9,13 +9,15 @@ import threading
 import time
 import uuid
 from functools import lru_cache
+from contextlib import closing
+import math
 
 import numpy as np
 import pypdfium2 as pdfium
 from fastapi import FastAPI, Header, HTTPException, Request, Response
-from PIL import Image, ImageSequence, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
-from searchable_pdf import build_pdf
+from searchable_pdf import build_pdf, ImagePdfBuilder, overlay_pdf
 from artifact_store import ArtifactError, ArtifactStore
 from starlette.responses import StreamingResponse
 
@@ -66,115 +68,137 @@ def decode_filename(value: str | None) -> str:
         return "documento"
 
 
-def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Image]:
-    is_pdf = content_type == "application/pdf" or filename.lower().endswith(".pdf")
-    if is_pdf:
-        pages = []
-        pixels = 0
-        # pypdfium2 4.30 no implementa el protocolo de context manager en
-        # PdfDocument (falla con "does not support the context manager
-        # protocol" si se usa "with"); se libera a mano con close().
+def is_pdf_source(data, content_type, filename):
+    return data.startswith(b'%PDF-') or content_type == 'application/pdf' or filename.lower().endswith('.pdf')
+
+
+def preflight_pdf(document):
+    limit = min(MAX_PAGES, 100)
+    if not 1 <= len(document) <= limit:
+        raise ValueError(f'El PDF supera el máximo de {limit} páginas o está vacío')
+    pixels = 0
+    for index in range(len(document)):
+        page = document[index]
+        try:
+            width, height = page.get_size()
+            if not math.isfinite(width) or not math.isfinite(height) or min(width, height) <= 0:
+                raise ValueError('La página PDF no tiene dimensiones válidas')
+            pixels += math.ceil(width * PDF_DPI / 72) * math.ceil(height * PDF_DPI / 72)
+            if pixels > min(MAX_PIXELS, 250_000_000):
+                raise ValueError('El documento supera el máximo de píxeles permitido')
+        finally:
+            page.close()
+
+
+def iter_render_pages(data: bytes, content_type: str, filename: str):
+    """Preflight every page/frame, then own at most the current decoded raster."""
+    if is_pdf_source(data, content_type, filename):
         document = pdfium.PdfDocument(data)
         try:
-            if len(document) > MAX_PAGES:
-                raise ValueError(f"El PDF supera el máximo de {MAX_PAGES} páginas")
-            scale = PDF_DPI / 72
+            preflight_pdf(document)
             for index in range(len(document)):
                 page = document[index]
                 try:
-                    width, height = page.get_size()
-                    pixels += int(width * scale + 1) * int(height * scale + 1)
-                    if pixels > MAX_PIXELS:
-                        raise ValueError("El documento supera el máximo de píxeles permitido")
-                    bitmap = page.render(scale=scale)
+                    bitmap = page.render(scale=PDF_DPI / 72)
                     try:
-                        pages.append(bitmap.to_pil().convert("RGB"))
+                        image = bitmap.to_pil().convert('RGB')
+                        try:
+                            yield image
+                        finally:
+                            image.close()
                     finally:
                         bitmap.close()
                 finally:
                     page.close()
         finally:
             document.close()
-        return pages
+    else:
+        with Image.open(io.BytesIO(data)) as source:
+            count = getattr(source, 'n_frames', 1)
+            if not 1 <= count <= min(MAX_PAGES, 100):
+                raise ValueError(f'El documento supera el máximo de {min(MAX_PAGES, 100)} páginas')
+            pixels = 0
+            for index in range(count):
+                source.seek(index)
+                pixels += source.width * source.height
+                if pixels > min(MAX_PIXELS, 250_000_000):
+                    raise ValueError('El documento supera el máximo de píxeles permitido')
+            for index in range(count):
+                source.seek(index)
+                image = source.convert('RGB')
+                try:
+                    yield image
+                finally:
+                    image.close()
 
-    with Image.open(io.BytesIO(data)) as image:
-        pages = []
-        pixels = 0
-        for frame in ImageSequence.Iterator(image):
-            if len(pages) >= MAX_PAGES:
-                raise ValueError(f"El documento supera el máximo de {MAX_PAGES} páginas")
-            pixels += frame.width * frame.height
-            if pixels > MAX_PIXELS:
-                raise ValueError("El documento supera el máximo de píxeles permitido")
-            pages.append(frame.copy().convert("RGB"))
-    if not pages:
-        raise ValueError("El documento no contiene páginas")
-    return pages
+
+def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Image]:
+    # Compatibility helper for callers needing independent images, not the OCR path.
+    copies = []
+    try:
+        with closing(iter_render_pages(data, content_type, filename)) as pages:
+            for image in pages:
+                copies.append(image.copy())
+        return copies
+    except Exception:
+        for image in copies:
+            image.close()
+        raise
 
 
 def recognize(data: bytes, content_type: str, filename: str, binary_pdf: bool = False) -> dict:
-    pages = render_pages(data, content_type, filename)
-    try:
-        return _recognize_pages(pages, binary_pdf)
-    finally:
-        for page in pages:
-            page.close()
-
-
-def _recognize_pages(pages: list[Image.Image], binary_pdf: bool) -> dict:
-    texts: list[str] = []
+    source_pdf = is_pdf_source(data, content_type, filename)
+    output_limit = MAX_ARTIFACT_BYTES if binary_pdf else None
+    builder = None if source_pdf else ImagePdfBuilder(PDF_DPI, output_limit)
+    page_texts_by_page = []
     weighted_score = 0.0
-    weight = 0
-    total_lines = 0
+    weight = total_lines = 0
     layout = []
     engine = get_engine()
-
-    for page_number, image in enumerate(pages, start=1):
-        # RapidOCR mantiene el orden de lectura de las líneas detectadas.
-        with _engine_lock:
-            result = engine(np.asarray(image))
-        page_texts = list(result.txts) if result.txts is not None else []
-        page_scores = list(result.scores) if result.scores is not None else []
-        page_boxes = list(result.boxes) if result.boxes is not None else []
-        blocks = []
-        for index, (text, box) in enumerate(zip(page_texts, page_boxes)):
-            points = np.asarray(box, dtype=float).reshape(-1, 2)
-            if not np.isfinite(points).all():
-                continue
-            x = max(0.0, min(float(points[:, 0].min()), image.width - 1.0))
-            y = max(0.0, min(float(points[:, 1].min()), image.height - 1.0))
-            right = max(x + 1, min(float(points[:, 0].max()), float(image.width)))
-            bottom = max(y + 1, min(float(points[:, 1].max()), float(image.height)))
-            blocks.append({"id": str(index), "text": text.strip(), "x": x, "y": y,
-                           "width": right - x, "height": bottom - y,
-                           "confidence": float(page_scores[index]) if index < len(page_scores) else 0.0})
-        layout.append({"width": image.width, "height": image.height, "blocks": blocks})
-        if len(pages) > 1:
-            texts.append(f"[Página {page_number}]")
+    with closing(iter_render_pages(data, content_type, filename)) as pages:
+        for image in pages:
+            with _engine_lock:
+                result = engine(np.asarray(image))
+            page_texts = list(result.txts) if result.txts is not None else []
+            page_scores = list(result.scores) if result.scores is not None else []
+            page_boxes = list(result.boxes) if result.boxes is not None else []
+            blocks = []
+            for index, (text, box) in enumerate(zip(page_texts, page_boxes)):
+                points = np.asarray(box, dtype=float).reshape(-1, 2)
+                if not np.isfinite(points).all():
+                    continue
+                x = max(0.0, min(float(points[:, 0].min()), image.width - 1.0))
+                y = max(0.0, min(float(points[:, 1].min()), image.height - 1.0))
+                right = max(x + 1, min(float(points[:, 0].max()), float(image.width)))
+                bottom = max(y + 1, min(float(points[:, 1].max()), float(image.height)))
+                blocks.append({'id': str(index), 'text': text.strip(), 'x': x, 'y': y,
+                               'width': right - x, 'height': bottom - y,
+                               'confidence': float(page_scores[index]) if index < len(page_scores) else 0.0})
+            page_layout = {'width': image.width, 'height': image.height, 'blocks': blocks}
+            layout.append(page_layout)
+            if builder is not None:
+                builder.add(image, page_layout)
+            page_texts_by_page.append(page_texts)
+            for text, score in zip(page_texts, page_scores):
+                line_weight = max(1, len(text.strip()))
+                weighted_score += float(score) * line_weight
+                weight += line_weight
+            total_lines += len(page_texts)
+    texts = []
+    for number, page_texts in enumerate(page_texts_by_page, start=1):
+        if len(layout) > 1:
+            texts.append(f'[Página {number}]')
         texts.extend(text.strip() for text in page_texts if text and text.strip())
-        if page_number < len(pages):
-            texts.append("")
-        for text, score in zip(page_texts, page_scores):
-            line_weight = max(1, len(text.strip()))
-            weighted_score += float(score) * line_weight
-            weight += line_weight
-        total_lines += len(page_texts)
-
-    pdf = build_pdf(pages, layout, PDF_DPI, max_output_bytes=MAX_ARTIFACT_BYTES if binary_pdf else None)
-    result = {
-        "text": "\n".join(texts).strip(),
-        "confidence": round(weighted_score / weight, 4) if weight else 0.0,
-        "pages": len(pages),
-        "lines": total_lines,
-        "model": "PP-OCRv5 latin / ONNX Runtime",
-        "layout": layout,
-    }
+        if number < len(layout):
+            texts.append('')
+    pdf = overlay_pdf(data, layout, PDF_DPI, output_limit) if source_pdf else builder.finish()
+    result = {'text': '\n'.join(texts).strip(), 'confidence': round(weighted_score / weight, 4) if weight else 0.0,
+              'pages': len(layout), 'lines': total_lines, 'model': 'PP-OCRv5 latin / ONNX Runtime', 'layout': layout}
     if binary_pdf:
-        result["pdfBytes"] = pdf
+        result['pdfBytes'] = pdf
     else:
-        result["pdfBase64"] = base64.b64encode(pdf).decode("ascii")
+        result['pdfBase64'] = base64.b64encode(pdf).decode('ascii')
     return result
-
 
 @lru_cache(maxsize=1)
 def get_artifact_store() -> ArtifactStore:
@@ -306,8 +330,27 @@ async def regenerate_pdf(request: Request) -> Response:
         if not isinstance(content_type, str) or not isinstance(filename, str):
             raise ValueError("Tipo de archivo o nombre inválido")
         def generate() -> bytes:
-            pages = render_pages(data, content_type, filename)
-            return build_pdf(pages, payload.get("layout"), PDF_DPI)
+            if is_pdf_source(data, content_type, filename):
+                document = pdfium.PdfDocument(data)
+                try:
+                    preflight_pdf(document)
+                finally:
+                    document.close()
+                return overlay_pdf(data, payload.get('layout'), PDF_DPI, MAX_ARTIFACT_BYTES)
+            layout = payload.get('layout')
+            if not isinstance(layout, list):
+                raise ValueError('La distribución debe contener todas las páginas del documento')
+            builder = ImagePdfBuilder(PDF_DPI, MAX_ARTIFACT_BYTES)
+            count = 0
+            with closing(iter_render_pages(data, content_type, filename)) as pages:
+                for image in pages:
+                    if count >= len(layout):
+                        raise ValueError('La distribución debe contener todas las páginas del documento')
+                    builder.add(image, layout[count])
+                    count += 1
+            if count != len(layout):
+                raise ValueError('La distribución debe contener todas las páginas del documento')
+            return builder.finish()
         result = await asyncio.to_thread(generate)
         return Response(content=result, media_type="application/pdf")
     except (ValueError, TypeError) as error:

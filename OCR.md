@@ -51,7 +51,17 @@ Los diagnósticos incluyen referencia, código, categoría de excepción, tamañ
 2. Reiniciar el backend actualizado con el procedimiento operativo de este equipo indicado abajo. El cliente nuevo requiere `/v2/ocr`; no degrada a una respuesta Base64 grande.
 3. Verificar con un PDF sintético pequeño: metadatos acotados, descarga repetida idéntica y PDF con texto buscable. No reprocesar documentos históricos ni lanzar trabajos largos sin autorización.
 
-Solo se probó el candidato en contenedores efímeros aislados y pruebas Java sin base de datos. El OCR/backend que ya están en ejecución no se actualizaron durante S1. La página larga, la cola durable y la optimización medida siguen pendientes.
+Solo se probó el candidato en contenedores efímeros aislados y pruebas Java sin base de datos. El OCR/backend que ya están en ejecución no se actualizaron durante S1 ni S2. La recuperación durable de páginas y trabajos y la optimización medida siguen pendientes.
+
+## PDF original y memoria por página: preparado, pendiente de despliegue
+
+Para entradas PDF, el candidato añade solamente una capa invisible de texto Unicode: no vuelve a dibujar el escaneo. Conserva los flujos comprimidos de imágenes, el orden, las dimensiones, el recorte y la rotación de las páginas. Los bytes y el hash del original no cambian. La regeneración antigua mediante `/pdf` utiliza el mismo procedimiento; `/ocr` y `/images/pdf` siguen siendo compatibles.
+
+Antes de renderizar, se comprueban los límites de 100 páginas y 250 millones de píxeles acumulados. El reconocimiento decodifica una página cada vez y libera su imagen, mapa de bits y página antes de continuar, también ante errores. Los fotogramas TIFF mantienen su orden. Las entradas de imagen siguen formando un PDF, escribiendo sus páginas progresivamente. Esto reduce la retención de imágenes decodificadas, pero **no garantiza memoria total constante**: permanecen modelos, estructuras del PDF, páginas codificadas y metadatos.
+
+La dependencia fijada es [pypdf 6.20.1, BSD-3-Clause](https://pypi.org/project/pypdf/6.20.1/), usando sus [transformaciones de superposición](https://pypdf.readthedocs.io/en/stable/user/add-watermark.html). Solo se instaló en la imagen candidata aislada, no globalmente ni en el servicio activo.
+
+Verificación del candidato: 46 pruebas aprobadas, incluida la suite histórica que requería pypdf; igualdad exacta de píxeles visibles en casos sintéticos con recortes y rotaciones de 0/90/180/270 grados. Una ejecución real del modelo con diez páginas sintéticas conservó imágenes y aspecto: 232466 bytes originales y 258089 bytes derivados (1,11 veces). No es una medición comparativa de rendimiento ni prueba con documentos del usuario. La activación sigue pendiente de verificación y autorización del coordinador.
 
 ## Consulta del PDF reconocido
 

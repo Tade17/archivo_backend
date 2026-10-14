@@ -45,23 +45,36 @@ class SearchablePdfTests(unittest.TestCase):
         image = self.pages[0]
         ImageDraw.Draw(image).text((100, 200), "Original scanned document", fill="black")
         data = build_pdf([image], self.layout[:1])
+        # PDFium's fractional-page rounding can resample even a lossless raster.
+        # Verify stored RGB bytes directly and compare identical PDF rendering paths.
+        reader = PdfReader(io.BytesIO(data))
+        stored_images = [obj.get_object() for obj in reader.pages[0]['/Resources']['/XObject'].values()
+                         if obj.get_object().get('/Subtype') == '/Image']
+        self.assertEqual(stored_images[0].get_data(), image.tobytes())
+        baseline = build_pdf([image], [{'width': image.width, 'height': image.height, 'blocks': []}])
         document = pdfium.PdfDocument(data)
+        original = pdfium.PdfDocument(baseline)
         try:
             page = document[0]
+            original_page = original[0]
             try:
                 bitmap = page.render(scale=220 / 72)
+                original_bitmap = original_page.render(scale=220 / 72)
                 try:
                     rendered = bitmap.to_pil().convert("RGB")
-                    # PDF rendering rounds dimensions; compare the original pixel area.
-                    rendered = rendered.crop((0, 0, image.width, image.height))
-                    difference = ImageChops.difference(image, rendered)
+                    source_render = original_bitmap.to_pil().convert('RGB')
+                    difference = ImageChops.difference(source_render, rendered)
                     self.assertIsNone(difference.getbbox())
+                    source_render.close(); rendered.close()
                 finally:
                     bitmap.close()
+                    original_bitmap.close()
             finally:
                 page.close()
+                original_page.close()
         finally:
             document.close()
+            original.close()
 
     def test_layout_must_match_original_and_stay_inside_page(self):
         with self.assertRaises(ValueError):

@@ -98,6 +98,16 @@ class OcrContractTests(unittest.TestCase):
         self.assertNotIn('synthetic OCR', str(captured.output))
         self.assertNotIn('private-input', str(captured.output))
 
+    def test_legacy_pdf_regeneration_preserves_source_streams(self):
+        from test_pdf_overlay import source_pdf, layout_for, image_streams
+        original = source_pdf((90, 270))
+        payload = json.dumps({'fileBase64': base64.b64encode(original).decode('ascii'),
+                              'contentType': 'application/pdf', 'filename': 'test.pdf',
+                              'layout': layout_for(original)}).encode('utf-8')
+        response = asyncio.run(app.regenerate_pdf(request(payload)))
+        self.assertEqual(response.media_type, 'application/pdf')
+        self.assertEqual(image_streams(original), image_streams(response.body))
+
 
 if __name__ == '__main__':
     unittest.main()
