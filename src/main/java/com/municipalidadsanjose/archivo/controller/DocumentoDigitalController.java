@@ -135,12 +135,14 @@ public class DocumentoDigitalController {
 
     // Deja constancia en auditoría (accion=DESCARGAR) de quién bajó el archivo,
     // y devuelve el binario real (no la metadata).
+    @PreAuthorize("isAuthenticated()")
     @GetMapping("/{id}/archivo")
     public ResponseEntity<Resource> descargarArchivo(@PathVariable UUID id) {
+        Resource recurso = documentoDigitalService.cargarArchivoOriginal(id);
         DocumentoDigitalResponseDTO metadata = documentoDigitalService.registrarDescarga(id);
-        Resource recurso = fileStorageService.cargarComoRecurso(metadata.rutaAlmacenamiento());
 
         return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .contentType(MediaType.parseMediaType(metadata.tipoMime()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename(metadata.nombreArchivo()).build().toString())

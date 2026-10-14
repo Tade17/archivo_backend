@@ -118,6 +118,14 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
                 .map(documentoDigitalMapper::toResponseDTO);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public org.springframework.core.io.Resource cargarArchivoOriginal(UUID id) {
+        DocumentoDigital documento = documentoDigitalRepository.findById(id)
+                .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", id));
+        return fileStorageService.cargarComoRecurso(documento.getRutaAlmacenamiento());
+    }
+
     // No es readOnly a propósito: aunque el método en sí solo lee, @Auditable
     // graba una fila de auditoría dentro de esta misma transacción, y con
     // readOnly=true Hibernate pone el flush en modo manual y ese INSERT nunca

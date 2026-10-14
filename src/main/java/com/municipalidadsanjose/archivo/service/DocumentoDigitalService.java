@@ -19,5 +19,7 @@ public interface DocumentoDigitalService {
     // Deja registrada la descarga en auditoría y devuelve la metadata necesaria
     // para que el Controller arme la respuesta con el archivo real.
     DocumentoDigitalResponseDTO registrarDescarga(UUID id);
+    // Resolve the stored resource internally; sanitized response DTOs are not storage locators.
+    org.springframework.core.io.Resource cargarArchivoOriginal(UUID id);
     void eliminar(UUID id);
 }

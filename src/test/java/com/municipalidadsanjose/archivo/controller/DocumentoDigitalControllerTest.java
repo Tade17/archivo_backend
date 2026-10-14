@@ -49,6 +49,7 @@ class DocumentoDigitalControllerTest {
 
     @Test
     void originalEndpointsRequireAuthentication() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class, () -> controller.descargarArchivo(id));
         assertThrows(AuthenticationCredentialsNotFoundException.class, () -> controller.originales(id));
         assertThrows(AuthenticationCredentialsNotFoundException.class, () -> controller.descargarOriginal(id, 1));
         verifyNoInteractions(batch, documents);
@@ -58,6 +59,7 @@ class DocumentoDigitalControllerTest {
     void anonymousCannotDownloadOriginals() {
         SecurityContextHolder.getContext().setAuthentication(new AnonymousAuthenticationToken("test", "anonymousUser",
                 List.of(new SimpleGrantedAuthority("ROLE_ANONYMOUS"))));
+        assertThrows(AccessDeniedException.class, () -> controller.descargarArchivo(id));
         assertThrows(AccessDeniedException.class, () -> controller.descargarOriginal(id, 1));
         verifyNoInteractions(batch);
     }
@@ -105,5 +107,38 @@ class DocumentoDigitalControllerTest {
         verify(batch).crear(eq(id), eq(technician), isNull(), isNull(), isNull(),
                 argThat(files -> files.stream().map(org.springframework.web.multipart.MultipartFile::getOriginalFilename)
                         .toList().equals(List.of("z.png", "middle.pdf", "a.png"))));
+    }
+
+    @Test
+    void originalFileDownloadUsesRealEntityPathWhilePublicDtoPathIsNull(@org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+        byte[] original="%PDF-original bytes".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        java.nio.file.Files.createDirectories(directory.resolve("exp"));
+        java.nio.file.Files.write(directory.resolve("exp/original.pdf"),original);
+        var storage=new com.municipalidadsanjose.archivo.storage.FileSystemStorageService(directory.toString(),20,"application/pdf");
+        var repository=mock(com.municipalidadsanjose.archivo.repository.DocumentoDigitalRepository.class);
+        var document=new com.municipalidadsanjose.archivo.entity.DocumentoDigital(); document.setId(id);
+        document.setRutaAlmacenamiento("exp/original.pdf"); document.setNombreArchivo("original.pdf"); document.setTipoMime("application/pdf");
+        var expediente=new com.municipalidadsanjose.archivo.entity.Expediente(); expediente.setId(UUID.randomUUID());
+        var technician=new com.municipalidadsanjose.archivo.entity.Usuario(); technician.setNombre("Test");
+        document.setExpediente(expediente); document.setTecnicoResponsable(technician);
+        when(repository.findById(id)).thenReturn(Optional.of(document));
+        var service=spy(new com.municipalidadsanjose.archivo.service.impl.DocumentoDigitalServiceImpl(repository,
+                mock(com.municipalidadsanjose.archivo.repository.ExpedienteRepository.class),
+                mock(com.municipalidadsanjose.archivo.repository.UsuarioRepository.class),
+                new com.municipalidadsanjose.archivo.mapper.DocumentoDigitalMapper(),storage,mock(OcrService.class),new tools.jackson.databind.ObjectMapper()));
+        assertNull(service.buscarPorId(id).rutaAlmacenamiento());
+        var actual=new DocumentoDigitalController(service,storage,mock(OcrService.class),mock(OcrPdfService.class),batch);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken("reader","",List.of()));
+        var response=actual.descargarArchivo(id);
+        assertEquals("application/pdf",response.getHeaders().getContentType().toString());
+        try(var stream=response.getBody().getInputStream()) { assertArrayEquals(original,stream.readAllBytes()); }
+        verify(service).registrarDescarga(id);
+        verify(service).cargarArchivoOriginal(id);
+        assertEquals("private, no-store",response.getHeaders().getCacheControl());
+        assertNull(service.buscarPorId(id).rutaAlmacenamiento());
+        var mvc=org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(actual).build();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/documentos-digitales/"+id+"/archivo"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().bytes(original));
     }
 }

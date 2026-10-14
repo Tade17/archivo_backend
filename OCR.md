@@ -95,7 +95,7 @@ El PDF está disponible en cuanto termina el procesamiento, incluso si la confia
 
 La interfaz permite seleccionar, copiar y buscar el texto reconocido, pero no editarlo. El PDF conserva la apariencia del escaneo. **Generar PDF con OCR** permite reintentar un procesamiento fallido sin volver a subir el documento.
 
-`GET /api/documentos-digitales/{id}/pdf` descarga el derivado y registra la descarga. `GET /api/documentos-digitales/{id}/archivo` obtiene el archivo principal subido o el PDF combinado. Para las imágenes de un lote combinado, utiliza las API de originales indicadas arriba.
+`GET /api/documentos-digitales/{id}/pdf` descarga el derivado y registra la descarga. `GET /api/documentos-digitales/{id}/archivo` obtiene el archivo principal subido o el PDF combinado. El servicio resuelve internamente el recurso asociado al documento; no utiliza la ruta null de la respuesta pública. La descarga requiere autenticación, conserva auditoría y no permite caché compartida. Para las imágenes de un lote combinado, utiliza las API de originales indicadas arriba.
 
 Los documentos antiguos sin correcciones y sin PDF se reprograman automáticamente al iniciar; las transcripciones antiguas revisadas se preservan y no se reprocesan automáticamente. No se expone una API para editar el texto ni su posición.
 
