@@ -10,6 +10,8 @@ Primero se convierte el lote de imágenes, sin OCR. Después de confirmar la tra
 
 Los originales se conservan byte por byte, con nombre, tipo real detectado, tamaño, hash y posición en un manifiesto asociado al documento. `GET /api/documentos-digitales/{id}/originales` lista los metadatos; `GET /api/documentos-digitales/{id}/originales/{orden}` descarga una imagen (posición desde 1), requiere autenticación y registra auditoría. Las rutas internas no forman parte de esa lista. En documentos históricos sin manifiesto, la lista está vacía y `/archivo` mantiene su comportamiento original. Eliminar el documento elimina el PDF combinado, el PDF OCR y sus imágenes originales solo después de confirmar la eliminación en base de datos.
 
+La descarga individual de las imágenes originales está disponible mediante esas API autenticadas. Este cambio no añade un nuevo control de descarga de originales en la interfaz.
+
 Límites: 100 archivos por carga, 20 MB por archivo, 20 MB en total para las imágenes y para el PDF combinado, 100 páginas y 250 millones de píxeles. Los límites configurados más bajos también se respetan. El tipo MIME declarado por el navegador no decide el formato: el backend comprueba firmas y el conversor valida y decodifica el contenido de cada imagen.
 
 Despliegue de este cambio: reconstruir solo OCR y reiniciar el backend actualizado. Flyway aplicará automáticamente `V12__documento_originales.sql`, que añade una columna de manifiesto nullable, sin convertir ni modificar documentos históricos. No aplicar la migración manualmente ni reiniciar la base de datos.
@@ -21,19 +23,15 @@ Despliegue de este cambio: reconstruir solo OCR y reiniciar el backend actualiza
 5. Se genera un PDF que conserva las páginas escaneadas y añade una capa Unicode de texto seleccionable y buscable. El backend guarda el PDF derivado y la distribución de los fragmentos; el archivo original y su hash se conservan.
 6. El backend guarda el resultado en `ocr_texto`; el trigger existente actualiza `ocr_tsv` para que el contenido pueda encontrarse desde Explorar.
 
-## Corrección opcional desde la página
+## Consulta del PDF reconocido
 
 El PDF está disponible en cuanto termina el procesamiento, incluso si la confianza es baja. No hay una aprobación manual obligatoria.
 
-1. Abre el documento y pulsa **Corregir texto en la página**.
-2. Selecciona un recuadro del fragmento reconocido y escribe la corrección en el editor sobre la página.
-3. Pulsa **Guardar PDF y búsqueda**. Se regenera el PDF con la capa corregida, se actualiza la búsqueda y se registra la modificación en auditoría.
+La interfaz permite seleccionar, copiar y buscar el texto reconocido, pero no editarlo. El PDF conserva la apariencia del escaneo. **Generar PDF con OCR** permite reintentar un procesamiento fallido sin volver a subir el documento.
 
-Las correcciones modifican el texto seleccionable, no las letras fotografiadas del escaneo. **Descargar PDF con texto** obtiene la versión actualizada; **Descargar original** obtiene el archivo subido. La búsqueda interna del visor funciona sobre el texto del PDF.
+`GET /api/documentos-digitales/{id}/pdf` descarga el derivado y registra la descarga. `GET /api/documentos-digitales/{id}/archivo` obtiene el archivo principal subido o el PDF combinado. Para las imágenes de un lote combinado, utiliza las API de originales indicadas arriba.
 
-La edición requiere rol administrador o gestor documental. Se controla la versión para evitar que dos operadores sobrescriban sus cambios. Los documentos antiguos sin correcciones y sin PDF se reprograman automáticamente al iniciar; las transcripciones antiguas revisadas se preservan y no se reprocesan automáticamente.
-
-API: `GET /api/documentos-digitales/{id}/ocr/layout` devuelve `{layout, version}`; `PUT` sobre la misma ruta guarda los textos de los bloques y devuelve el documento actualizado. Las coordenadas y los identificadores no pueden alterarse. `GET /api/documentos-digitales/{id}/pdf` descarga el derivado y registra la descarga.
+Los documentos antiguos sin correcciones y sin PDF se reprograman automáticamente al iniciar; las transcripciones antiguas revisadas se preservan y no se reprocesan automáticamente. No se expone una API para editar el texto ni su posición.
 
 Estados posibles:
 
@@ -72,6 +70,28 @@ Después se inicia el backend normalmente:
 ./mvnw spring-boot:run
 ```
 
+### Reinicio en este equipo Windows: recuperación del selector JDK
+
+En este equipo, los intentos iniciales con Java 24 y Java 21 fallaron al arrancar Tomcat con `Unable to establish loopback connection` y `Invalid argument: connect`. Cambiar el proveedor de selector tampoco resolvió el problema. Se verificó por separado `Selector.open()` y la alternativa TCP que utiliza `PipeImpl` cuando no puede crear el socket de dominio Unix.
+
+Desde `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/archivo_backend`, el reinicio operativo probado con Java 24 es:
+
+```powershell
+.\mvnw.cmd "-Dspring-boot.run.jvmArguments=-Djdk.net.unixdomain.tmpdir=C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/selector-probe-do-not-create" spring-boot:run
+```
+
+**No crear el directorio `selector-probe-do-not-create`.** Su inexistencia permite la alternativa TCP comprobada. La propiedad se aplica solo a esa ejecución: no se modificaron variables persistentes, seguridad del equipo ni configuración del proyecto. No es una corrección del código de la aplicación ni una recomendación general para otros equipos.
+
+El reinicio controlado aplicó Flyway V12 y validó `originales_manifest` como columna `TEXT` nullable. Backend en 8080, documentación API HTTP 200, descarga de originales sin autenticación HTTP 401, frontend en 4200 HTTP 200 y OCR saludable. Esto verifica disponibilidad y despliegue, no una carga completa autenticada desde el navegador.
+
+Antes de la migración se validó una copia PostgreSQL formato personalizado (`PGDMP`, 112 entradas, 55 461 bytes):
+
+- Copia: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/archivo_sanjose-pre-v12-20261014-120932.dump`.
+- Inicio recuperado: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/backend-recovery-tcp.stdout.log`.
+- Intentos fallidos: `backend-20261014-120932.stdout.log` y `backend-recovery-java21.stdout.log` en el mismo directorio.
+
+No restaurar esa copia sobre datos actuales sin autorización y una evaluación de los cambios posteriores. La columna añadida puede permanecer al revertir código; eliminarla después de cargar imágenes agrupadas perdería sus asociaciones.
+
 ## Configuración
 
 | Variable | Valor inicial | Uso |
@@ -93,5 +113,5 @@ Los documentos se procesan localmente. No se envían a servicios externos ni req
 - **Error de procesamiento, tamaño o tiempo máximo:** el backend distingue rechazo del archivo (HTTP 400/422), límite de tamaño (413), error interno (5xx), conexión y tiempo agotado. No muestra respuestas internas del servicio ni rutas privadas. Un error de procesamiento no implica que el contenedor esté apagado.
 - **El documento queda en ERROR:** confirma que `docker compose ps` muestre `archivo-ocr` como saludable y utiliza **Reintentar OCR**.
 - **Docker no está iniciado:** abre Docker Desktop y vuelve a ejecutar `docker compose up -d --build`.
-- **Resultado con baja confianza:** la interfaz mostrará **Revisión recomendada** y permitirá corregir el texto sin volver a procesar el archivo.
+- **Resultado con baja confianza:** revisa visualmente el escaneo y el texto seleccionado; la capa reconocida sigue siendo de solo lectura.
 - **PDF demasiado grande:** ajusta `OCR_MAX_PAGES` con prudencia; más páginas aumentan el tiempo y uso de memoria.
