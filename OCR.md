@@ -79,6 +79,8 @@ Los documentos se procesan localmente. No se envían a servicios externos ni req
 
 ## Errores frecuentes
 
+- **Servicio saludable pero el PDF falla al procesarse:** la salud comprueba disponibilidad, no la conversión. Si cambió `ocr_service/app.py`, reconstruye solo OCR con `docker compose up -d --build ocr`; esto no modifica PostgreSQL ni los documentos guardados. Después reintenta el documento existente, sin volver a subirlo. La imagen anterior usaba un context manager no soportado por pypdfium2 4.30; la versión actual cierra explícitamente documento, páginas y mapas de bits.
+- **Error de procesamiento, tamaño o tiempo máximo:** el backend distingue rechazo del archivo (HTTP 400/422), límite de tamaño (413), error interno (5xx), conexión y tiempo agotado. No muestra respuestas internas del servicio ni rutas privadas. Un error de procesamiento no implica que el contenedor esté apagado.
 - **El documento queda en ERROR:** confirma que `docker compose ps` muestre `archivo-ocr` como saludable y utiliza **Reintentar OCR**.
 - **Docker no está iniciado:** abre Docker Desktop y vuelve a ejecutar `docker compose up -d --build`.
 - **Resultado con baja confianza:** la interfaz mostrará **Revisión recomendada** y permitirá corregir el texto sin volver a procesar el archivo.
