@@ -42,6 +42,17 @@ app = FastAPI(title="OCR Archivo Municipal", docs_url=None, redoc_url=None, life
 MAX_BYTES = int(os.getenv("OCR_MAX_BYTES", str(25 * 1024 * 1024)))
 MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "100"))
 PDF_DPI = int(os.getenv("OCR_PDF_DPI", "220"))
+
+
+def cpu_threads(name: str, default: int) -> int:
+    value = int(os.getenv(name, str(default)))
+    if value not in (1, 2):
+        raise ValueError("OCR CPU threads must be 1 or 2")
+    return value
+
+
+ORT_INTRA_THREADS = cpu_threads("OCR_ORT_INTRA_THREADS", 2)
+ORT_INTER_THREADS = cpu_threads("OCR_ORT_INTER_THREADS", 1)
 MAX_PIXELS = int(os.getenv("OCR_MAX_PIXELS", "250000000"))
 IMAGE_BATCH_MAX_BYTES = 20 * 1024 * 1024
 IMAGE_BATCH_MAX_FILES = 100
@@ -99,6 +110,8 @@ def get_engine() -> RapidOCR:
     return RapidOCR(
         params={
             "Global.text_score": 0.45,
+            "EngineConfig.onnxruntime.intra_op_num_threads": ORT_INTRA_THREADS,
+            "EngineConfig.onnxruntime.inter_op_num_threads": ORT_INTER_THREADS,
             "Det.engine_type": EngineType.ONNXRUNTIME,
             "Det.lang_type": LangDet.CH,
             "Det.model_type": ModelType.MOBILE,
@@ -524,7 +537,7 @@ def engine_fingerprint():
     config = {'schema': 1, 'rapidocr': version('rapidocr'), 'onnxruntime': version('onnxruntime'),
               'model': 'PP-OCRv5-latin-mobile', 'textScore': 0.45,
               'dpi': PDF_DPI, 'pages': min(MAX_PAGES, 100), 'pixels': min(MAX_PIXELS, 250000000),
-              'pypdf': version('pypdf')}
+              'pypdf': version('pypdf'), 'intraOpThreads': ORT_INTRA_THREADS, 'interOpThreads': ORT_INTER_THREADS}
     model_root = Path(rapidocr.__file__).parent / 'models'
     digests = {}
     for name in ('ch_PP-OCRv5_det_mobile.onnx', 'ch_ppocr_mobile_v2.0_cls_mobile.onnx', 'latin_PP-OCRv5_rec_mobile.onnx'):

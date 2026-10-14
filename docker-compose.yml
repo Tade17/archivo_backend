@@ -29,6 +29,8 @@ services:
       OCR_MAX_BYTES: "26214400"
       OCR_MAX_PAGES: "100"
       OCR_PDF_DPI: "220"
+      OCR_ORT_INTRA_THREADS: "2"
+      OCR_ORT_INTER_THREADS: "1"
       OCR_ARTIFACT_DIR: "/var/lib/archivo-ocr/artifacts"
       OCR_ARTIFACT_MAX_BYTES: "134217728"
       OCR_ARTIFACT_TOTAL_BYTES: "536870912"

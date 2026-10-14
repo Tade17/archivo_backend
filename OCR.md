@@ -181,3 +181,23 @@ Los documentos se procesan localmente. No se envían a servicios externos ni req
 - **Docker no está iniciado:** abre Docker Desktop y vuelve a ejecutar `docker compose up -d --build`.
 - **Resultado con baja confianza:** revisa visualmente el escaneo y el texto seleccionado; la capa reconocida sigue siendo de solo lectura.
 - **PDF demasiado grande:** ajusta `OCR_MAX_PAGES` con prudencia; más páginas aumentan el tiempo y uso de memoria.
+
+## Rendimiento medido y configuración de CPU (S6)
+
+La configuración recomendada mantiene **un motor y un trabajo a la vez**, 220 DPI, sin GPU y sin omitir páginas por encontrar texto extraíble. Se establecen `OCR_ORT_INTRA_THREADS=2` y `OCR_ORT_INTER_THREADS=1`; ambos aceptan únicamente 1 o 2. Las claves verificadas en RapidOCR 3.9.2 son `EngineConfig.onnxruntime.intra_op_num_threads` e `EngineConfig.onnxruntime.inter_op_num_threads` ([configuración oficial](https://github.com/rapidai/rapidocr/blob/main/python/rapidocr/config.yaml), [aplicación en ONNX Runtime](https://github.com/rapidai/rapidocr/blob/main/python/rapidocr/inference_engine/onnxruntime/main.py)). Se comprobó su valor efectivo en las tres sesiones de detección, clasificación y reconocimiento. Estos parámetros forman parte de la huella de configuración: nunca reutilizar checkpoints de otra configuración; drenar/retener trabajos antes de cambiarla.
+
+Prueba local aislada: un contenedor por caso, sin red, límite de 2 CPU/3 GiB, 180 segundos por caso. Corpus generado de páginas JPEG 1000×1400, texto conocido y 220 DPI. La referencia reconstruye la lista de rásteres y exportación que redibuja el fondo, usando el mismo motor/modelos/corpus; **no es una comparación de dos despliegues completos**. El candidato conserva el PDF original y añade la capa invisible. Medias descriptivas de dos ejecuciones, con un hilo en ambas variantes para separar la estrategia PDF de la configuración CPU:
+
+| Páginas | Referencia: segundos / páginas por minuto | Candidato: segundos / páginas por minuto | PDF referencia / candidato | RSS máximo referencia / candidato |
+|---|---|---|---|---|
+| 1 | 1,57 / 38,18 | 1,27 / 47,33 | 853.629 / 117.683 bytes | 509,7 / 502,0 MiB |
+| 10 | 15,62 / 38,41 | 12,27 / 48,91 | 8.333.026 / 979.728 bytes | 569,3 / 608,8 MiB |
+| 40 | 62,77 / 38,23 | 48,22 / 49,78 | 33.235.908 / 3.850.618 bytes | 678,4 / 521,3 MiB |
+
+El candidato de 10 páginas registró 51,79 s con hilos automáticos, 12,27 s con un hilo y 9,22 s con dos (dos muestras por ajuste; dos hilos: 65,07 páginas/minuto y RSS máximo 612,1 MiB). Una comprobación adicional de 40 páginas con dos hilos obtuvo 35,77 s, 67,09 páginas/minuto y 511,8 MiB; es **una muestra**, no un promedio estadístico. Tres imágenes ordenadas con un hilo: dos muestras, media 4,72 s, PDF 2.553.445 bytes, RSS máximo 512,2 MiB; la conversión de imágenes aún codifica sus fondos y merece una optimización separada, no se elimina ni altera silenciosamente.
+
+Todos los casos conservaron el orden de etiquetas y reconocieron exactamente el texto sintético (CER 0). Los PDF candidatos conservaron los bytes/hash del original, los streams comprimidos de imágenes y los píxeles visibles de primera/última página al renderizar a 72 DPI; la referencia rasterizada no conserva dichos streams/píxeles. El tamaño candidato/original PDF fue 1,2262 / 1,0285 / 1,0120 para 1/10/40 páginas, frente a 8,8947 / 8,7475 / 8,7346 en la referencia. Los campos inputBytes/hash de imagen-batch usan el PDF sintético de referencia; no representan el tamaño de la petición JSON ni el hash de cada JPEG.
+
+El tiempo de generación, arranque del modelo y calentamiento se registra por separado; el RSS incluye estos pasos y la validación, no toda la VM ni memoria constante. No hay p95, garantía de aceleración en expedientes reales, prueba de A4 pesado hasta 250 millones de píxeles ni medición HTTP/checkpoints/Java/base de datos/interfaz. No se activan dos motores: no se midió su coste ni ventaja en la VM de 8 GB. La omisión por texto existente queda diferida porque una capa parcial/invisible no prueba que todo el documento sea útil o buscable.
+
+Resultados y registros recuperables: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/ocr-scalability-benchmark/summary.json` y archivos JSON/log por caso. No contienen documentos del usuario ni credenciales. El cambio de configuración está verificado localmente; la activación del sistema sigue siendo una operación separada.
