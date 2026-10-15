@@ -1,112 +1,103 @@
-# Actualización de la base de datos Docker
+# Actualizar sin perder datos
 
-Esta guía permite levantar o actualizar la base de datos del proyecto sin perder la información existente. El esquema se administra con **Flyway**: al iniciar el backend, las migraciones pendientes se ejecutan automáticamente y una sola vez.
+Esta guía actualiza una instalación local existente. Para una instalación nueva, sigue [README.md](README.md). Flyway administra el esquema: actualmente existen migraciones **V1 a V13**.
 
-## Actualizar una instalación existente
+## 1. Preparar y respaldar
 
-1. Detén el backend, pero no elimines el volumen de PostgreSQL.
-2. Actualiza el repositorio:
+1. Espera, si es posible, a que terminen los trabajos OCR. Si quedan trabajos pendientes, conserva su volumen y no cambies modelos, DPI o hilos durante la actualización.
+2. Detén **el backend anterior** con `Ctrl+C` en su terminal. No ejecutes dos versiones a la vez.
+3. Conserva el contenedor PostgreSQL y ambos volúmenes. No uses `docker compose down -v`.
+4. Respalda la base y la carpeta de documentos antes de migrar.
 
-   ```bash
-   git pull origin main
-   ```
+En PowerShell, desde `archivo_backend`, con PostgreSQL disponible:
 
-3. Inicia o confirma el contenedor de PostgreSQL:
-
-   ```bash
-   docker compose up -d --build
-   docker compose ps
-   ```
-
-4. Opcionalmente, crea una copia de seguridad antes de migrar:
-
-   ```bash
-   docker exec archivo-postgres pg_dump -U postgres -d archivo_sanjose > backup_antes_de_actualizar.sql
-   ```
-
-5. Inicia el backend desde la raíz de `archivo_backend`:
-
-   ```bash
-   # Windows PowerShell
-   .\mvnw.cmd spring-boot:run
-
-   # Linux, macOS o Git Bash
-   ./mvnw spring-boot:run
-   ```
-
-El backend se conecta por defecto a `localhost:5433`, que es el puerto publicado por `docker-compose.yml`. Flyway detectará la versión existente y aplicará únicamente las migraciones nuevas.
-
-## Cambios de base incluidos
-
-- `V4__modo_solo_digital.sql`: permite expedientes sin caja ni ubicación física.
-- `V5__roles_claros_y_correlativos.sql`:
-  - crea los perfiles `GESTOR_DOCUMENTAL` y `LECTOR`;
-  - migra automáticamente los usuarios con roles anteriores;
-  - crea el contador anual utilizado para generar números de expediente sin intervención del usuario.
-- `V6__busqueda_sin_tildes.sql`: habilita `unaccent` para buscar sin escribir tildes.
-- `V7__ocr_automatico.sql`: añade estados, confianza, errores y recuperación del reconocimiento automático sin eliminar transcripciones existentes.
-
-Estas migraciones conservan los expedientes, documentos y usuarios existentes.
-
-## Verificar que la actualización terminó
-
-En el inicio del backend debe aparecer un mensaje similar a:
-
-```text
-Current version of schema "public": 7
-Schema "public" is up to date
+```powershell
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$backup = Join-Path (Split-Path (Get-Location).Path -Parent) "backups/archivo-$stamp"
+New-Item -ItemType Directory -Path $backup -Force | Out-Null
+$containerDump = "/tmp/archivo-$stamp.dump"
+docker exec archivo-postgres pg_dump -U postgres -d archivo_sanjose -Fc -f $containerDump
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo respaldar PostgreSQL. No continuar.' }
+docker cp "archivo-postgres:$containerDump" (Join-Path $backup 'database.dump')
+if ($LASTEXITCODE -ne 0) { throw 'No se pudo copiar el respaldo. No continuar.' }
+docker exec archivo-postgres pg_restore --list $containerDump
+if ($LASTEXITCODE -ne 0) { throw 'El respaldo no pudo leerse. No continuar.' }
 ```
 
-También se puede consultar directamente dentro del contenedor:
+El comando escribe el binario dentro del contenedor y luego lo copia: evita la redirección binaria de PowerShell. Adapta usuario, base y contenedor si no usas Compose predeterminado. No escribas contraseñas en comandos compartidos.
 
-```bash
+Copia también la **carpeta real** configurada en `STORAGE_BASE_DIR`. Para la ubicación predeterminada:
+
+```powershell
+Copy-Item -LiteralPath '.\storage\documentos' -Destination (Join-Path $backup 'documentos') -Recurse
+```
+
+Si nunca hubo documentos, esa carpeta puede no existir. Si ya había documentos y falta, localiza el almacenamiento real antes de continuar. Leer el índice del dump confirma que es legible, no que una restauración completa haya sido probada.
+
+El volumen `archivo_ocr_artifacts` contiene trabajos y puntos de control; **no está dentro del dump ni de la carpeta de documentos**. No lo borres ni cambies su nombre/proyecto Compose. Para trasladar el equipo o recuperar toda la instalación necesitas un respaldo coherente de ese volumen, además de la base y los documentos. Mantén los respaldos fuera del repositorio y con acceso restringido.
+
+## 2. Obtener la versión actual
+
+Dentro del repositorio, con cambios propios guardados o confirmados:
+
+```powershell
+git status
+git switch main
+git pull --ff-only origin main
+```
+
+Si hay divergencias o cambios locales incompatibles, detente y coordina la integración. No descartes cambios ni fuerces el historial.
+
+## 3. Actualizar OCR antes que Java
+
+```powershell
+docker compose up -d postgres
+docker compose up -d --build ocr
+docker compose ps
+Invoke-RestMethod http://localhost:8091/health
+Invoke-RestMethod http://localhost:8091/v2/jobs/config
+```
+
+Espera `jobsReady: true` y una respuesta de configuración sin 404. Si usas otro puerto OCR, adapta las direcciones y `OCR_URL` del backend. Reconstruir OCR conserva los volúmenes declarados; no elimina documentos.
+
+## 4. Iniciar Java y comprobar Flyway
+
+En la misma terminal que contiene tus variables de configuración:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+En Linux/macOS: `./mvnw spring-boot:run`. Deja esta terminal abierta. Flyway aplica solo las migraciones pendientes; **no ejecutes los SQL manualmente**.
+
+En otra terminal puedes comprobar el historial:
+
+```powershell
 docker exec archivo-postgres psql -U postgres -d archivo_sanjose -c "SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
 ```
 
-Todas las filas deben tener `success = true` y la última versión debe ser `7`.
+Todas las migraciones deben ser exitosas y, para esta versión, la última es **13**. Comprueba también Swagger en 8080, inicio de sesión y una carga sintética pequeña. Actualiza el frontend siguiendo [su README](https://github.com/Tade17/archivo_frontend#readme).
 
-## Primera instalación
+La disponibilidad de servicios y un historial correcto no sustituyen una prueba completa de carga y OCR.
 
-En un equipo sin datos previos basta con ejecutar:
+## Qué cambió en el esquema
 
-```bash
-docker compose up -d --build
-./mvnw spring-boot:run
-```
+- V1–V3: esquema y datos iniciales.
+- V4–V6: flujo digital, perfiles y correlativos, búsqueda sin tildes.
+- V7–V8: reconocimiento automático y PDF con texto posicionado.
+- V9–V11: contenedores, estado registrado y préstamos externos.
+- V12: manifiesto de imágenes originales.
+- V13: trabajos OCR, lease, reintentos y progreso por página.
 
-Flyway creará el esquema completo y aplicará las migraciones de `V1` a `V7`.
+Las migraciones no convierten ni borran los originales existentes. La cola no reintenta automáticamente todos los documentos históricos en ERROR.
 
-## Reglas importantes
+## Si algo falla
 
-- No edites una migración `V*.sql` que ya haya sido aplicada. Los cambios futuros deben ir en una migración nueva (`V8`, `V9`, etc.).
-- `docker compose down` detiene los servicios, pero conserva la base.
-- **No uses `docker compose down -v` en un entorno con información real**: la opción `-v` elimina completamente el volumen y sus datos.
-- No ejecutes manualmente el contenido de las migraciones; deja que Flyway controle el orden y registre cada actualización.
-- Los documentos cargados se guardan fuera de PostgreSQL, en `storage/documentos` por defecto. Conserva también esa carpeta al realizar respaldos o trasladar la instalación.
+- Conserva respaldos, archivos, volúmenes y el error exacto; no improvises una restauración sobre datos más nuevos.
+- No edites migraciones ya aplicadas. Añade nuevas versiones para cambios futuros.
+- No uses `repair`, `skipExecutingMigrations`, eliminación de columnas o reinicialización como soluciones generales.
+- Si hay un checksum distinto, compara el historial y la versión del repositorio; una base antigua puede requerir reconciliación específica por un responsable, después de respaldar.
+- Un rollback del código no implica un rollback seguro del esquema o de los trabajos OCR. Una versión antigua no puede continuar necesariamente los trabajos nuevos.
+- `docker compose down` conserva volúmenes, pero no es necesario para esta actualización. **`down -v` los elimina.**
 
-## Si Flyway informa un error de validación
-
-1. No borres el volumen ni ejecutes `repair` de forma automática.
-2. Confirma que el repositorio esté actualizado y que las migraciones antiguas no hayan sido modificadas localmente:
-
-   ```bash
-   git status
-   git pull origin main
-   ```
-
-3. Guarda una copia con `pg_dump` y revisa el mensaje concreto de Flyway antes de realizar cualquier corrección.
-
-En una instalación de desarrollo sin información que conservar, se puede reconstruir todo con `docker compose down -v` y `docker compose up -d`, pero esta operación es destructiva y no debe utilizarse en producción.
-
-### Caso: una versión antigua aplicó OCR como V6
-
-Algunas bases recibieron `V6__ocr_automatico.sql` antes de integrar la migración de búsqueda. En el repositorio actual, V6 corresponde a `busqueda_sin_tildes` y OCR es V7. Esto produce `Migration checksum mismatch for migration version 6` aunque los datos sigan intactos.
-
-Antes de reconciliar una de estas bases, confirma en `flyway_schema_history` que la versión 6 dice `ocr automatico`, que las columnas `ocr_estado` y `ocr_confianza` ya existen y que falta la extensión `unaccent`. Haz un respaldo con `pg_dump`. Solo entonces:
-
-1. Ejecuta `CREATE EXTENSION IF NOT EXISTS unaccent;` en esa base para aplicar el contenido de la V6 actual.
-2. Ejecuta Flyway `repair` con las migraciones de este repositorio para alinear el registro de V6.
-3. Ejecuta Flyway `migrate` con `skipExecutingMigrations=true` y `target=7` para registrar V7 sin repetir los cambios OCR que ya existen.
-4. Inicia el backend normalmente y comprueba que Flyway valide las siete migraciones.
-
-No uses `skipExecutingMigrations` en una base que todavía no tenga el esquema OCR: en ese caso V7 debe ejecutarse normalmente.
+Para errores de red, puertos y selector Java, consulta [README.md](README.md) y [OCR.md](OCR.md).

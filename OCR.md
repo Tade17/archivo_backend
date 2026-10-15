@@ -1,213 +1,130 @@
-# OCR automático
+# OCR automático: operación y límites
 
-El sistema reconoce texto localmente con **RapidOCR**, usando detección y clasificación de orientación de PaddleOCR y el reconocedor latino **PP-OCRv5** sobre ONNX Runtime. Es la misma familia tecnológica identificada en ImageTrans, integrada como un servicio independiente y reproducible.
+El sistema utiliza **RapidOCR 3.9.2**, PP-OCRv5 latino y ONNX Runtime en CPU. Los documentos se procesan localmente, sin servicios OCR externos ni claves de API. La imagen descarga y valida los modelos durante su construcción.
 
-## Funcionamiento
+Para instalar todo el sistema sigue [README.md](README.md); para actualizar conservando información, [ACTUALIZACION_BD_DOCKER.md](ACTUALIZACION_BD_DOCKER.md). Esta guía describe el código actual, no certifica el estado de un equipo concreto.
 
-En una misma carga, las imágenes PNG/JPEG/TIFF se unen en `imagenes.pdf` en el orden recibido. Cada TIFF aporta sus fotogramas en su orden interno. Los PDF subidos permanecen separados; si se intercalan imágenes y PDF, el grupo ocupa la posición de la primera imagen. No se ordena por nombre.
+## Flujo visible
 
-Primero se convierte el lote de imágenes, sin OCR. Después de confirmar la transacción se encola el OCR automático del PDF combinado mediante el evento existente. La carga requiere que el servicio local OCR esté disponible para convertir las imágenes; si falla la conversión, se revierte el lote y se limpian sus archivos. La creación del expediente y su carga posterior siguen siendo operaciones independientes: un fallo de carga no elimina el expediente ya creado.
+1. Al guardar, los PDF permanecen separados. Las imágenes PNG/JPEG/TIFF forman `imagenes.pdf` en el orden elegido; cada TIFF mantiene el orden interno de sus páginas. No se ordena por nombre.
+2. La conversión de imágenes necesita el servicio disponible; ocurre antes de guardar. El OCR comienza después de confirmar la carga.
+3. La cola PostgreSQL conserva documentos pendientes. La interfaz permite consultar fase y páginas procesadas.
+4. Un único worker OCR reconoce una página a la vez y guarda un punto de control. Tras una interrupción retoma páginas pendientes sin repetir las ya confirmadas, si sigue disponible el trabajo y su configuración.
+5. El PDF reconocido conserva el escaneo y añade una capa Unicode invisible, seleccionable y buscable. No permite editar texto.
+6. El backend publica el resultado, actualiza el texto para búsqueda y confirma la recepción al servicio.
 
-Los originales se conservan byte por byte, con nombre, tipo real detectado, tamaño, hash y posición en un manifiesto asociado al documento. `GET /api/documentos-digitales/{id}/originales` lista los metadatos; `GET /api/documentos-digitales/{id}/originales/{orden}` descarga una imagen (posición desde 1), requiere autenticación y registra auditoría. Las rutas internas no forman parte de esa lista. En documentos históricos sin manifiesto, la lista está vacía y `/archivo` mantiene su comportamiento original. Eliminar el documento elimina el PDF combinado, el PDF OCR y sus imágenes originales solo después de confirmar la eliminación en base de datos.
+Los originales se conservan byte por byte. El PDF OCR es un derivado: su hash no sustituye al original. Para entradas PDF no se reconstruye cada página como imagen; se conserva el contenido original y se superpone texto.
 
-La descarga individual de las imágenes originales está disponible mediante esas API autenticadas. Este cambio no añade un nuevo control de descarga de originales en la interfaz.
+Un error de OCR no exige volver a subir el documento. La acción de reintento genera un nuevo intento cuando corresponde; no duplica un documento que sigue pendiente o procesándose.
 
-Límites: 100 archivos por carga, 20 MB por archivo, 20 MB en total para las imágenes y para el PDF combinado, 100 páginas y 250 millones de píxeles. Los límites configurados más bajos también se respetan. El tipo MIME declarado por el navegador no decide el formato: el backend comprueba firmas y el conversor valida y decodifica el contenido de cada imagen.
+## Comprobar que está listo
 
-Despliegue de este cambio: reconstruir solo OCR y reiniciar el backend actualizado. Flyway aplicará automáticamente `V12__documento_originales.sql`, que añade una columna de manifiesto nullable, sin convertir ni modificar documentos históricos. No aplicar la migración manualmente ni reiniciar la base de datos.
-
-1. El backend valida los archivos y guarda cada PDF separado o el PDF combinado y sus imágenes originales; crea un registro por documento resultante.
-2. La respuesta al usuario no espera al OCR.
-3. Un worker envía el archivo al servicio `archivo-ocr`.
-4. El servicio procesa todas las páginas y devuelve texto, confianza y cantidad de páginas.
-5. Se genera un PDF que conserva las páginas escaneadas y añade una capa Unicode de texto seleccionable y buscable. El backend guarda el PDF derivado y la distribución de los fragmentos; el archivo original y su hash se conservan.
-6. El backend guarda el resultado en `ocr_texto`; el trigger existente actualiza `ocr_tsv` para que el contenido pueda encontrarse desde Explorar.
-
-## Transporte binario v2: preparado, pendiente de despliegue
-
-El backend actualizado solicita `/v2/ocr`: recibe texto, distribución y una referencia pequeña del PDF, no una cadena Base64 del PDF completo. Después descarga el binario desde `/v2/artifacts/{id}` con una capacidad independiente en `X-Artifact-Capability`. No se aceptan direcciones de descarga proporcionadas por la respuesta ni redirecciones HTTP que puedan reenviar esa capacidad.
-
-El archivo descargado se publica atómicamente solo después de validar tipo PDF, firma, tamaño declarado y real, y SHA-256. Los archivos parciales se limpian; un PDF anterior útil se conserva hasta que la actualización del documento se confirma. Si falla una transferencia por E/S, se intenta descargar el mismo artefacto una vez más sin ejecutar de nuevo el reconocimiento.
-
-| Límite | Valor máximo |
-|---|---:|
-| Metadatos JSON | 16 MiB |
-| PDF derivado individual | 128 MiB |
-| Datos PDF en caché, incluidos parciales interrumpidos | 512 MiB |
-| Artefactos o reservas en caché | 32 |
-| Retención | 1 hora |
-
-Los manifiestos privados añaden un máximo acotado de 4 KiB por artefacto. Los valores configurados más bajos se respetan. La cuota no expulsa descargas activas; cuando se agota, se rechaza la admisión en lugar de borrar un artefacto válido. El límite de originales y del PDF combinado de imágenes sigue siendo 20 MB; 128 MiB se aplica únicamente al PDF OCR derivado.
-
-Al caducar, se deniegan nuevas descargas. La limpieza de artefactos caducados y parciales interrumpidos se realiza al admitir otro artefacto o reiniciar la caché; las descargas ya activas se conservan hasta terminar.
-
-La caché utiliza el volumen independiente `archivo_ocr_artifacts`. Identificadores y capacidades son aleatorios e independientes; la comparación de capacidades es de tiempo constante y los manifiestos almacenan solamente su hash. No se siguen enlaces simbólicos ni rutas aportadas por el cliente. No borrar volúmenes para actualizar el servicio. El diseño actual conserva un único worker de servicio OCR; recuperación durable de trabajos y puntos de control por página corresponden a tareas posteriores, no a este transporte.
-
-Los diagnósticos incluyen referencia, código, categoría de excepción, tamaños y duración, sin texto reconocido, nombres/rutas de documentos ni capacidades. No se aumentan globalmente los límites de Jackson. El HTTP 200 seguido de error de parseo observado es compatible con una cadena Base64 demasiado grande (reproducción sintética confirmada); no se conservó la excepción del documento original, por lo que su causa exacta todavía no está confirmada.
-
-### Orden de activación y compatibilidad
-
-1. Después de verificar y autorizar el despliegue, reconstruir únicamente OCR. Mantiene `/ocr`, `/pdf` y `/images/pdf` para clientes anteriores.
-2. Reiniciar el backend actualizado con el procedimiento operativo de este equipo indicado abajo. El cliente nuevo requiere `/v2/ocr`; no degrada a una respuesta Base64 grande.
-3. Verificar con un PDF sintético pequeño: metadatos acotados, descarga repetida idéntica y PDF con texto buscable. No reprocesar documentos históricos ni lanzar trabajos largos sin autorización.
-
-Solo se probó el candidato en contenedores efímeros aislados y pruebas Java sin base de datos. El OCR/backend que ya están en ejecución no se actualizaron durante S1 ni S2. La recuperación durable de páginas y trabajos y la optimización medida siguen pendientes.
-
-## PDF original y memoria por página: preparado, pendiente de despliegue
-
-Para entradas PDF, el candidato añade solamente una capa invisible de texto Unicode: no vuelve a dibujar el escaneo. Conserva los flujos comprimidos de imágenes, el orden, las dimensiones, el recorte y la rotación de las páginas. Los bytes y el hash del original no cambian. La regeneración antigua mediante `/pdf` utiliza el mismo procedimiento; `/ocr` y `/images/pdf` siguen siendo compatibles.
-
-Antes de renderizar, se comprueban los límites de 100 páginas y 250 millones de píxeles acumulados. El reconocimiento decodifica una página cada vez y libera su imagen, mapa de bits y página antes de continuar, también ante errores. Los fotogramas TIFF mantienen su orden. Las entradas de imagen siguen formando un PDF, escribiendo sus páginas progresivamente. Esto reduce la retención de imágenes decodificadas, pero **no garantiza memoria total constante**: permanecen modelos, estructuras del PDF, páginas codificadas y metadatos.
-
-La dependencia fijada es [pypdf 6.20.1, BSD-3-Clause](https://pypi.org/project/pypdf/6.20.1/), usando sus [transformaciones de superposición](https://pypdf.readthedocs.io/en/stable/user/add-watermark.html). Solo se instaló en la imagen candidata aislada, no globalmente ni en el servicio activo.
-
-Verificación del candidato: 46 pruebas aprobadas, incluida la suite histórica que requería pypdf; igualdad exacta de píxeles visibles en casos sintéticos con recortes y rotaciones de 0/90/180/270 grados. Una ejecución real del modelo con diez páginas sintéticas conservó imágenes y aspecto: 232466 bytes originales y 258089 bytes derivados (1,11 veces). No es una medición comparativa de rendimiento ni prueba con documentos del usuario. La activación sigue pendiente de verificación y autorización del coordinador.
-
-## Trabajos recuperables: preparado, pendiente de despliegue
-
-El candidato incorpora una cola local durable en el subdirectorio privado `jobs` del volumen OCR existente. Un único worker guarda el original y confirma un punto de control justo después de reconocer cada página. Al reiniciar, continúa las páginas pendientes sin repetir el reconocimiento de las ya confirmadas. Conserva el resultado terminado para volver a descargarlo sin ejecutar OCR. No utiliza Redis, Celery ni una base de datos nueva.
-
-La admisión reserva espacio para original, puntos de control y PDF derivado junto con los artefactos anteriores: 512 MiB compartidos, hasta ocho trabajos y 32 posiciones combinadas. Con los máximos iniciales caben aproximadamente tres trabajos completos. Cada página confirma como máximo 256 KiB; puntos de control y metadatos del resultado comparten 16 MiB por trabajo. No se amplían los límites de páginas, píxeles ni tamaño original. Si no hay capacidad se rechaza temporalmente la carga; no se crea una cola ilimitada.
-
-Los identificadores y capacidades independientes los genera el cliente; el servicio guarda únicamente el hash de la capacidad. Comprueba SHA-256 del original y una huella de configuración/modelos. Una repetición idéntica del mismo identificador devuelve su estado; un cambio de contenido o configuración se rechaza. Los diagnósticos no incluyen texto, rutas ni capacidades.
-
-Los estados son `QUEUED`, `RUNNING`, `COMPLETED`, `ERROR` y `CANCELLED`, con fase y páginas confirmadas/total. Los trabajos activos y las descargas abiertas no caducan mientras están en uso; los terminales se conservan una hora y luego se limpian al admitir, consultar o reiniciar. La cancelación actúa entre páginas y antes de publicar; no elimina originales del backend. Un reintento intencional de un trabajo terminal requiere un identificador nuevo.
-
-Las API nuevas son `/v2/jobs/config`, creación y consulta `/v2/jobs/{id}`, resultado `/v2/jobs/{id}/result` y cancelación mediante DELETE. Usan `X-Job-Capability`; la creación también verifica `X-Source-SHA256` y `X-OCR-Fingerprint`. La descarga mantiene `/v2/artifacts/{id}` y `X-Artifact-Capability`. Solo después de publicar correctamente el resultado, el backend podrá confirmar su recepción con DELETE `/v2/jobs/{id}/result`: devuelve 204 y libera el almacenamiento privado. Una descarga activa impide esa limpieza con 503; la confirmación fallida conserva el resultado. La repetición después de limpiar devuelve 404, que el cliente puede tratar como ya liberado. La limpieza confirmada puede completarse al reiniciar si hubo un fallo de disco posterior. El contrato completo y sus códigos están en `odd/tasks/ocr-scalability.md`. Las rutas antiguas siguen disponibles, pero rechazan sobrecarga con 503 en vez de esperar sin límite. `/health` distingue disponibilidad de la cola mediante `jobsReady`.
-
-Verificación aislada: 70 pruebas aprobadas y recuperación sintética de tres páginas con el modelo real: tres reconocimientos en total, ninguno repetido para la página ya confirmada. Todos los workers de prueba se cerraron. **No está desplegado ni integrado todavía con la cola Java**; el progreso visible y la recuperación del backend corresponden a las tareas siguientes. No borrar el volumen para actualizar o revertir: una versión anterior no puede continuar estos trabajos.
-
-## Cola del backend y progreso: preparado, pendiente de despliegue
-
-El candidato Java consulta continuamente la cola PostgreSQL, reclamando un documento cada vez. No envía todos los documentos a una cola limitada de threads: los registros pendientes permanecen en la base hasta ser atendidos. Una lease identifica al worker y caduca si deja de renovarse; un heartbeat independiente la mantiene durante comunicaciones y descargas. El inicio no reinicia leases activas ni reintenta automáticamente documentos históricos en ERROR.
-
-El identificador, la capacidad y la huella del trabajo OCR se guardan de forma privada antes de enviarlo. Los reintentos de comunicación conservan esa identidad y los puntos de control Python. Se permiten hasta cinco reintentos automáticos transitorios, con espera creciente; archivos inválidos y errores terminales requieren una decisión explícita. Si un trabajo ya enviado caducó en Python, no se vuelve a reconocer silenciosamente. El botón de reintento no puede duplicar un documento pendiente o procesándose.
-
-El resultado solo se publica si siguen vigentes la lease y el identificador del trabajo. Primero se confirma la actualización en PostgreSQL; después se limpia el PDF anterior y se confirma la recepción en Python. Una confirmación remota fallida no revierte el documento publicado. La eliminación usa el mismo bloqueo y cancela el trabajo remoto solo después de confirmar su transacción.
-
-La respuesta incorpora `ocrPaginasProcesadas`, `ocrPaginasTotales`, `ocrFase` y `ocrProximoReintento`, todos compatibles con valores null históricos. No expone capacidades, propietarios de lease ni rutas privadas; el campo antiguo `rutaAlmacenamiento` queda null y las rutas de descarga autenticadas no cambian. La interfaz con este progreso corresponde a S5, todavía pendiente.
-
-`V13__ocr_jobs_progress.sql` añade columnas nullable y un índice de cola, sin modificar originales. Se verificó únicamente en PostgreSQL desechable con una marca de propiedad y un puerto/base distintos de producción. **Antes del despliegue se necesita una copia actual de producción y detener el backend anterior**; después se actualiza OCR y arranca el backend nuevo con el procedimiento operativo de este equipo. No ejecutar versiones vieja y nueva simultáneamente ni borrar volúmenes o columnas para revertir. El despliegue y la migración real siguen pendientes.
-
-## Consulta del PDF reconocido
-
-El PDF está disponible en cuanto termina el procesamiento, incluso si la confianza es baja. No hay una aprobación manual obligatoria.
-
-La interfaz permite seleccionar, copiar y buscar el texto reconocido, pero no editarlo. El PDF conserva la apariencia del escaneo. **Generar PDF con OCR** permite reintentar un procesamiento fallido sin volver a subir el documento.
-
-`GET /api/documentos-digitales/{id}/pdf` descarga el derivado y registra la descarga. `GET /api/documentos-digitales/{id}/archivo` obtiene el archivo principal subido o el PDF combinado. El servicio resuelve internamente el recurso asociado al documento; no utiliza la ruta null de la respuesta pública. La descarga requiere autenticación, conserva auditoría y no permite caché compartida. Para las imágenes de un lote combinado, utiliza las API de originales indicadas arriba.
-
-Los documentos antiguos sin correcciones y sin PDF se reprograman automáticamente al iniciar; las transcripciones antiguas revisadas se preservan y no se reprocesan automáticamente. No se expone una API para editar el texto ni su posición.
-
-Estados posibles:
-
-- `PENDIENTE`: esperando un worker.
-- `PROCESANDO`: el OCR está trabajando.
-- `COMPLETADO`: texto reconocido con confianza suficiente.
-- `REQUIERE_REVISION`: no se encontró texto suficiente o la confianza quedó debajo del umbral.
-- `ERROR`: el servicio no pudo procesar el archivo; puede reintentarse desde la interfaz.
-
-Los trabajos pendientes permanecen en PostgreSQL. En el candidato de cola durable, un procesamiento interrumpido se reclama cuando su lease caduca; no se reinicia un worker cuya lease sigue activa.
-
-## Iniciar el entorno
-
-```bash
-docker compose up -d --build
-```
-
-La primera construcción tarda más porque instala RapidOCR y descarga los modelos dentro de la imagen. Las ejecuciones posteriores reutilizan la imagen local.
-
-Verificación:
-
-```bash
-docker compose ps
-docker compose logs -f ocr
-```
-
-El servicio publica solamente en `127.0.0.1:8091`. Su comprobación de salud está disponible en `http://localhost:8091/health`.
-
-Después se inicia el backend normalmente:
-
-```bash
-# Windows
-.\mvnw.cmd spring-boot:run
-
-# Linux/macOS
-./mvnw spring-boot:run
-```
-
-### Reinicio en este equipo Windows: recuperación del selector JDK
-
-En este equipo, los intentos iniciales con Java 24 y Java 21 fallaron al arrancar Tomcat con `Unable to establish loopback connection` y `Invalid argument: connect`. Cambiar el proveedor de selector tampoco resolvió el problema. Se verificó por separado `Selector.open()` y la alternativa TCP que utiliza `PipeImpl` cuando no puede crear el socket de dominio Unix.
-
-Desde `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/archivo_backend`, el reinicio operativo probado con Java 24 es:
+Desde `archivo_backend`:
 
 ```powershell
-.\mvnw.cmd "-Dspring-boot.run.jvmArguments=-Djdk.net.unixdomain.tmpdir=C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/selector-probe-do-not-create" spring-boot:run
+docker compose ps
+Invoke-RestMethod http://localhost:8091/health
+Invoke-RestMethod http://localhost:8091/v2/jobs/config
 ```
 
-**No crear el directorio `selector-probe-do-not-create`.** Su inexistencia permite la alternativa TCP comprobada. La propiedad se aplica solo a esa ejecución: no se modificaron variables persistentes, seguridad del equipo ni configuración del proyecto. No es una corrección del código de la aplicación ni una recomendación general para otros equipos.
+Busca **`jobsReady: true`** y una configuración sin 404. Salud HTTP200 por sí sola no demuestra que un documento haya sido procesado.
 
-El reinicio controlado aplicó Flyway V12 y validó `originales_manifest` como columna `TEXT` nullable. Backend en 8080, documentación API HTTP 200, descarga de originales sin autenticación HTTP 401, frontend en 4200 HTTP 200 y OCR saludable. Esto verifica disponibilidad y despliegue, no una carga completa autenticada desde el navegador.
+Si recibes404 en la configuración, reconstruye la imagen actual con `docker compose up -d --build ocr`, espera salud y reinicia el backend actualizado. No elimines volúmenes. Si usas `OCR_HOST_PORT`, adapta las URLs y `OCR_URL` en Java.
 
-Antes de la migración se validó una copia PostgreSQL formato personalizado (`PGDMP`, 112 entradas, 55 461 bytes):
+## Estados y recuperación
 
-- Copia: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/archivo_sanjose-pre-v12-20261014-120932.dump`.
-- Inicio recuperado: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-image-upload/backend-recovery-tcp.stdout.log`.
-- Intentos fallidos: `backend-20261014-120932.stdout.log` y `backend-recovery-java21.stdout.log` en el mismo directorio.
+| Estado del documento | Significado |
+|---|---|
+| `PENDIENTE` | Espera en PostgreSQL |
+| `PROCESANDO` | Trabajo reclamado, con fase y páginas |
+| `COMPLETADO` | Texto reconocido con confianza suficiente |
+| `REQUIERE_REVISION` | Poco texto o confianza baja; el PDF puede consultarse sin aprobación manual obligatoria |
+| `ERROR` | Fallo terminal o reintentos agotados; requiere decisión explícita |
 
-No restaurar esa copia sobre datos actuales sin autorización y una evaluación de los cambios posteriores. La columna añadida puede permanecer al revertir código; eliminarla después de cargar imágenes agrupadas perdería sus asociaciones.
+Java reclama un documento cada vez con una lease y un heartbeat. Los trabajos interrumpidos pueden reclamarse al caducar la lease; no se reinician leases activas. Los errores transitorios tienen hasta cinco reintentos automáticos con espera creciente. Un trabajo remoto caducado no se reconoce otra vez silenciosamente.
+
+El servicio guarda trabajos y avances en el volumen **`archivo_ocr_artifacts`**. Conserva resultados terminales durante una hora, salvo confirmación de recepción o limpieza aplicable. No cambies modelos, DPI ni hilos con trabajos pendientes: su huella debe coincidir para reutilizar puntos de control. No existe una garantía de recuperación después de borrar el volumen o caducar el trabajo.
+
+## Transporte y almacenamiento
+
+El backend recibe metadatos pequeños y descarga el PDF **binario**, no una cadena Base64 gigante en JSON. Valida tipo, firma, tamaño y SHA-256 antes de publicar atómicamente. Un fallo transitorio de descarga puede reintentar el mismo artefacto sin repetir el reconocimiento. Un resultado útil anterior se conserva hasta confirmar la actualización.
+
+| Límite | Valor inicial o máximo |
+|---|---:|
+| Archivos por carga en la interfaz | 100 |
+| Archivo original | 20 MB |
+| Lote en la interfaz | 150 MB |
+| Imágenes juntas y PDF combinado | 20 MB |
+| Páginas OCR | 100 |
+| Píxeles acumulados | 250 millones |
+| Metadatos/puntos de control por trabajo | 16 MiB |
+| PDF OCR derivado | 128 MiB |
+| Caché compartida de trabajos y artefactos | 512 MiB |
+| Trabajos admitidos | Hasta 8, sujetos al espacio disponible |
+| Artefactos/reservas combinados | Hasta 32 |
+| Retención terminal | 1 hora |
+
+Se respetan límites configurados más bajos. El máximo de páginas no garantiza que cualquier documento de 100 páginas quepa: también cuentan píxeles y bytes. Con reservas máximas de entrada/salida caben aproximadamente tres trabajos completos; la cola no es ilimitada. La admisión puede rechazar temporalmente por capacidad en vez de borrar resultados válidos.
+
+La memoria no es completamente constante: se libera la imagen de cada página, pero permanecen modelos, estructuras del PDF y metadatos.
 
 ## Configuración
 
-| Variable | Valor inicial | Uso |
-|---|---:|---|
-| `OCR_ENABLED` | `true` | Activa el procesamiento automático. |
-| `OCR_URL` | `http://localhost:8091` | Dirección interna del servicio OCR. |
-| `OCR_TIMEOUT_SECONDS` | `300` | Tiempo máximo por documento. |
-| `OCR_REVIEW_THRESHOLD` | `0.75` | Confianza mínima para marcar el resultado como completado. |
-| `OCR_MAX_PAGES` | `100` | Máximo de páginas que procesa el contenedor. |
-| `OCR_PDF_DPI` | `220` | Resolución utilizada al convertir las páginas de un PDF a imagen. |
+| Dónde | Claves |
+|---|---|
+| Terminal Java | `OCR_ENABLED`, `OCR_URL`, `OCR_TIMEOUT_SECONDS`, `OCR_REVIEW_THRESHOLD`, `OCR_ARTIFACT_MAX_BYTES`, `OCR_POLL_MILLIS`, `OCR_LEASE_SECONDS` |
+| Servicio Compose | `OCR_MAX_BYTES`, `OCR_MAX_PAGES`, `OCR_PDF_DPI`, `OCR_ORT_INTRA_THREADS`, `OCR_ORT_INTER_THREADS`, `OCR_ARTIFACT_DIR`, `OCR_ARTIFACT_MAX_BYTES`, `OCR_ARTIFACT_TOTAL_BYTES`, `OCR_ARTIFACT_MAX_COUNT`, `OCR_ARTIFACT_TTL_SECONDS` |
+| Sustitución Compose | `OCR_HOST_PORT` |
 
-## Privacidad
+La configuración actual usa **220 DPI, intra 2/inter 1 y un motor/un trabajo a la vez**, sin GPU ni omisión automática por encontrar texto. Los hilos admiten 1 o 2. Cambiar un `.env` Compose no cambia las variables del proceso Java.
 
-Los documentos se procesan localmente. No se envían a servicios externos ni requieren claves de API. El texto reconocido queda dentro de PostgreSQL y los archivos originales permanecen en `storage/documentos`.
+No aumentes motores, páginas o concurrencia sin medir memoria y tiempo con un corpus representativo. El timeout es de comunicación, no una promesa de tiempo total por documento.
 
-## Errores frecuentes
+## Rendimiento medido
 
-- **Servicio saludable pero el PDF falla al procesarse:** la salud comprueba disponibilidad, no la conversión. Si cambió `ocr_service/app.py`, reconstruye solo OCR con `docker compose up -d --build ocr`; esto no modifica PostgreSQL ni los documentos guardados. Después reintenta el documento existente, sin volver a subirlo. La imagen anterior usaba un context manager no soportado por pypdfium2 4.30; la versión actual cierra explícitamente documento, páginas y mapas de bits.
-- **Error de procesamiento, tamaño o tiempo máximo:** el backend distingue rechazo del archivo (HTTP 400/422), límite de tamaño (413), error interno (5xx), conexión y tiempo agotado. No muestra respuestas internas del servicio ni rutas privadas. Un error de procesamiento no implica que el contenedor esté apagado.
-- **El documento queda en ERROR:** confirma que `docker compose ps` muestre `archivo-ocr` como saludable y utiliza **Reintentar OCR**.
-- **Docker no está iniciado:** abre Docker Desktop y vuelve a ejecutar `docker compose up -d --build`.
-- **Resultado con baja confianza:** revisa visualmente el escaneo y el texto seleccionado; la capa reconocida sigue siendo de solo lectura.
-- **PDF demasiado grande:** ajusta `OCR_MAX_PAGES` con prudencia; más páginas aumentan el tiempo y uso de memoria.
+Pruebas sintéticas locales aisladas, límite de 2 CPU/3 GiB, páginas JPEG de 1000×1400 y 220 DPI. La referencia reconstruía el fondo; el candidato conserva el PDF y añade texto. Medias de dos ejecuciones con un hilo en ambas variantes:
 
-## Rendimiento medido y configuración de CPU (S6)
+| Páginas | Referencia | PDF conservado | Tamaño referencia / conservado |
+|---|---:|---:|---:|
+| 1 | 1,57 s | 1,27 s | 853629 / 117683 bytes |
+| 10 | 15,62 s | 12,27 s | 8333026 / 979728 bytes |
+| 40 | 62,77 s | 48,22 s | 33235908 / 3850618 bytes |
 
-La configuración recomendada mantiene **un motor y un trabajo a la vez**, 220 DPI, sin GPU y sin omitir páginas por encontrar texto extraíble. Se establecen `OCR_ORT_INTRA_THREADS=2` y `OCR_ORT_INTER_THREADS=1`; ambos aceptan únicamente 1 o 2. Las claves verificadas en RapidOCR 3.9.2 son `EngineConfig.onnxruntime.intra_op_num_threads` e `EngineConfig.onnxruntime.inter_op_num_threads` ([configuración oficial](https://github.com/rapidai/rapidocr/blob/main/python/rapidocr/config.yaml), [aplicación en ONNX Runtime](https://github.com/rapidai/rapidocr/blob/main/python/rapidocr/inference_engine/onnxruntime/main.py)). Se comprobó su valor efectivo en las tres sesiones de detección, clasificación y reconocimiento. Estos parámetros forman parte de la huella de configuración: nunca reutilizar checkpoints de otra configuración; drenar/retener trabajos antes de cambiarla.
+Con dos hilos, 10 páginas promediaron 9,22 s en dos muestras; una muestra de 40 páginas tardó 35,77 s. Esto orientó la configuración CPU, **no garantiza ese rendimiento en expedientes reales** ni incluye toda la cadena HTTP/Java/base/interfaz. No se midieron percentiles ni el máximo de píxeles. Los resultados sintéticos conservaron orden, texto esperado y apariencia visible.
 
-Prueba local aislada: un contenedor por caso, sin red, límite de 2 CPU/3 GiB, 180 segundos por caso. Corpus generado de páginas JPEG 1000×1400, texto conocido y 220 DPI. La referencia reconstruye la lista de rásteres y exportación que redibuja el fondo, usando el mismo motor/modelos/corpus; **no es una comparación de dos despliegues completos**. El candidato conserva el PDF original y añade la capa invisible. Medias descriptivas de dos ejecuciones, con un hilo en ambas variantes para separar la estrategia PDF de la configuración CPU:
+Las pruebas se pueden ampliar con `ocr_service/benchmark_ocr.py` en un entorno aislado; no uses documentos privados ni el servicio compartido para experimentar sin autorización.
 
-| Páginas | Referencia: segundos / páginas por minuto | Candidato: segundos / páginas por minuto | PDF referencia / candidato | RSS máximo referencia / candidato |
-|---|---|---|---|---|
-| 1 | 1,57 / 38,18 | 1,27 / 47,33 | 853.629 / 117.683 bytes | 509,7 / 502,0 MiB |
-| 10 | 15,62 / 38,41 | 12,27 / 48,91 | 8.333.026 / 979.728 bytes | 569,3 / 608,8 MiB |
-| 40 | 62,77 / 38,23 | 48,22 / 49,78 | 33.235.908 / 3.850.618 bytes | 678,4 / 521,3 MiB |
+## API y privacidad
 
-El candidato de 10 páginas registró 51,79 s con hilos automáticos, 12,27 s con un hilo y 9,22 s con dos (dos muestras por ajuste; dos hilos: 65,07 páginas/minuto y RSS máximo 612,1 MiB). Una comprobación adicional de 40 páginas con dos hilos obtuvo 35,77 s, 67,09 páginas/minuto y 511,8 MiB; es **una muestra**, no un promedio estadístico. Tres imágenes ordenadas con un hilo: dos muestras, media 4,72 s, PDF 2.553.445 bytes, RSS máximo 512,2 MiB; la conversión de imágenes aún codifica sus fondos y merece una optimización separada, no se elimina ni altera silenciosamente.
+- `/v2/jobs/config`: huella y configuración.
+- `/v2/jobs/{id}`: creación, estado y cancelación; capacidad privada del trabajo.
+- `/v2/jobs/{id}/result`: resultado y confirmación de recepción.
+- `/v2/artifacts/{id}`: descarga binaria protegida por capacidad; los artefactos de trabajos durables reutilizan la capacidad del trabajo.
+- Las rutas antiguas `/ocr`, `/pdf` y `/images/pdf` se mantienen para compatibilidad; no son la vía de recuperación del cliente actual.
 
-Todos los casos conservaron el orden de etiquetas y reconocieron exactamente el texto sintético (CER 0). Los PDF candidatos conservaron los bytes/hash del original, los streams comprimidos de imágenes y los píxeles visibles de primera/última página al renderizar a 72 DPI; la referencia rasterizada no conserva dichos streams/píxeles. El tamaño candidato/original PDF fue 1,2262 / 1,0285 / 1,0120 para 1/10/40 páginas, frente a 8,8947 / 8,7475 / 8,7346 en la referencia. Los campos inputBytes/hash de imagen-batch usan el PDF sintético de referencia; no representan el tamaño de la petición JSON ni el hash de cada JPEG.
+No publiques capacidades ni accedas directamente al OCR desde redes externas. Su puerto local no reemplaza una política de acceso para producción.
 
-El tiempo de generación, arranque del modelo y calentamiento se registra por separado; el RSS incluye estos pasos y la validación, no toda la VM ni memoria constante. No hay p95, garantía de aceleración en expedientes reales, prueba de A4 pesado hasta 250 millones de píxeles ni medición HTTP/checkpoints/Java/base de datos/interfaz. No se activan dos motores: no se midió su coste ni ventaja en la VM de 8 GB. La omisión por texto existente queda diferida porque una capa parcial/invisible no prueba que todo el documento sea útil o buscable.
+El backend exige autenticación y registra auditoría en las descargas: `/api/documentos-digitales/{id}/archivo`, `/pdf` y `/originales/{orden}`. La consulta `/originales` lista metadatos y requiere autenticación; no es una descarga de archivo. Los documentos históricos sin manifiesto tienen una lista de originales vacía. Las rutas privadas y capacidades no se exponen en la respuesta pública.
 
-Resultados y registros recuperables: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/ocr-scalability-benchmark/summary.json` y archivos JSON/log por caso. No contienen documentos del usuario ni credenciales. El cambio de configuración está verificado localmente; la activación del sistema sigue siendo una operación separada.
+## Problema de selector Java en Windows
 
-## Estado de activación: bloqueada por política de ejecución
+Si Tomcat falla con `Unable to establish loopback connection` o `Invalid argument: connect`, comprueba primero JDK17 y puertos. En un equipo se observó un problema del selector de Java 21/24; no era un fallo OCR.
 
-S1–S6 están implementados y verificados en `fix/ocr-image-upload`, **pero todavía no están activados en el sistema en uso**. S6: `aec4ee9`, 79 pruebas Python verificadas por el coordinador; interfaz S5: `2fb143d`, 37 pruebas. La evaluación nativa de ambas ramas es medium/under_budget, no una aprobación; límites de revisión pendientes en main. Sin push, PR ni merge.
+Solo para ese diagnóstico, se probó una propiedad de JVM temporal que fuerza la alternativa TCP cuando el directorio de sockets Unix no existe. Desde el repositorio:
 
-Se generó y validó el respaldo previo a V13 en `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-scalability/archivo_sanjose-pre-v13-20261014-163114.dump` (57.018 bytes, PGDMP, 112 entradas; SHA256 `18471abd3c3a9211f78533e0ced0bb3081d1a83ffd828056d257a6bef20e72c5`). Su esquema completo V12 se restauró en PostgreSQL aislado y el OCR de prueba quedó listo. Sin embargo, el inicio oculto del backend de prueba fue rechazado por la política del entorno **antes de ejecutarse**: no hubo inicio de aplicación, migración V13 ni prueba completa. No se intentó otro lanzador ni eludir la restricción. Los contenedores de prueba propios fueron retirados tras comprobar identidad/etiquetas; registro en `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-scalability/staging-cleanup.json`.
+```powershell
+$selectorPath = Join-Path (Get-Location).Path '.selector-path-must-not-exist'
+if (Test-Path -LiteralPath $selectorPath) { throw 'La ruta debe permanecer inexistente. No continuar con esta alternativa.' }
+$jvmArgument = '-Djdk.net.unixdomain.tmpdir="' + $selectorPath + '"'
+.\mvnw.cmd "-Dspring-boot.run.jvmArguments=$jvmArgument" spring-boot:run
+```
 
-El sistema actual permanece en V12: backend 8080 responde HTTP200 y OCR8091 está saludable. Una revisión autenticada de solo lectura abrió el PDF existente de39 páginas y confirmó que el backend anterior todavía muestra la respuesta inválida; no se reintentó ni modificó el documento. La sesión se cerró. Captura: `C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/ocr-scalability-verification/current-document-before-activation.jpg`. No se guardan credenciales ni tokens. El flujo nuevo y la comprobación visual móvil siguen pendientes.
+**No crees esa carpeta.** La propiedad solo afecta esa ejecución; no cambies seguridad del sistema ni variables persistentes. Es una alternativa específica, no una exigencia normal de instalación ni una garantía para todos los equipos. Si vuelve a fallar, conserva el error y solicita diagnóstico; no pruebes lanzadores para evadir restricciones del entorno.
 
-Para retomar, primero se necesita una vía de ejecución aprobada por el entorno, sin comandos alternativos que evadan la política. Validar V13 sobre el esquema completo restaurado y después el flujo asíncrono autenticado con archivos sintéticos aislados. Solo entonces: respaldo fresco, drenar/conservar trabajos, activar OCR primero y reiniciar backend mediante el mecanismo TCP temporal ya documentado. Mantener el directorio de prueba inexistente y el volumen OCR; no cambiar seguridad del sistema ni reintentar automáticamente errores históricos. El respaldo y la salud del servicio no sustituyen esta prueba completa.
+## Incidentes anteriores y límites de diagnóstico
+
+- Una imagen antigua utilizaba una operación no soportada por pypdfium2; reconstruir OCR incorporó el cierre explícito de recursos.
+- Se reprodujo sintéticamente un fallo al interpretar un PDF Base64 enorme; el transporte binario evita esa cadena. No se conservó la excepción del documento original, por lo que esa causa exacta no quedó confirmada para aquel caso.
+- Los registros muestran códigos, tamaños y duración, no deben incluir texto reconocido, rutas privadas ni capacidades. Redáctalos antes de compartir.
+
+Consulta el [seguimiento técnico](odd/tasks/ocr-scalability.md) para evidencia histórica; sus estados describen cada etapa de desarrollo y no sustituyen la verificación del despliegue actual.

@@ -1,177 +1,153 @@
-# archivo-backend
+# Archivo municipal: backend y OCR
 
-Backend para el sistema de archivo digital de la **Municipalidad Distrital de San José**. La API administra expedientes digitales, documentos, usuarios, permisos y auditoría. El sistema ya no registra ubicaciones físicas, cajas ni préstamos.
+API del archivo digital de la Municipalidad Distrital de San José. Gestiona expedientes, archivos, usuarios y búsqueda por contenido. Los PDF adjuntos permanecen separados; las imágenes se unen en un PDF en el orden elegido y el OCR se ejecuta automáticamente después de guardar.
 
-> Si ya tienes una base en Docker, sigue [ACTUALIZACION_BD_DOCKER.md](ACTUALIZACION_BD_DOCKER.md). No es necesario borrar el volumen: Flyway aplica las migraciones pendientes al iniciar el backend.
+Esta guía es para **desarrollo local**. Necesitas también [archivo_frontend](https://github.com/Tade17/archivo_frontend).
 
-## Stack
+## Qué debes iniciar
 
-- Java 17 + Spring Boot 4.1
-- PostgreSQL (esquema versionado con Flyway)
-- Spring Security + JWT (autenticación y autorización por rol)
-- Spring Data JPA / Hibernate
-- Maven
-- RapidOCR + PP-OCRv5 latino + ONNX Runtime (servicio local en Docker)
+| Proceso | Inicio | Dirección local |
+|---|---|---|
+| PostgreSQL 17 | Docker Compose | `localhost:5433` |
+| OCR local | Docker Compose | `http://localhost:8091` |
+| API Java | Maven Wrapper | `http://localhost:8080` |
+| Interfaz Angular | npm, en otra terminal | `http://localhost:4200` |
 
-## Requisitos
+**Compose no inicia Java ni Angular.** Mantén abiertas las terminales de ambos mientras trabajas.
 
-- JDK 17
-- Docker Desktop (para levantar Postgres — ver abajo) **o** una instancia de Postgres 17 propia
+## 1. Preparar el equipo
 
-No hace falta instalar Maven: el repo trae el wrapper (`./mvnw` / `mvnw.cmd`).
+- Git.
+- **JDK 17**, con `JAVA_HOME` y `PATH` apuntando al JDK.
+- Docker Desktop iniciado, con contenedores Linux y Docker Compose v2.
+- Para la interfaz: Node.js **24.15 o superior dentro de 24.x**, y npm **11.16.0**.
 
-## Levantar el proyecto
+Comprueba en PowerShell:
 
-### 1. Base de datos
+```powershell
+git --version
+java -version
+docker version
+docker compose version
+```
 
-La forma más simple es con el Postgres que ya viene armado en `docker-compose.yml`:
+No necesitas Maven global, Python local, GPU ni claves de proveedores OCR. La primera construcción necesita Internet para descargar dependencias y modelos y puede tardar varios minutos. Los modelos quedan en la imagen; el reconocimiento posterior es local.
 
-```bash
+## 2. Descargar e iniciar PostgreSQL y OCR
+
+Desde la carpeta donde guardarás ambos repositorios:
+
+```powershell
+git clone https://github.com/Tade17/archivo_backend.git
+Set-Location archivo_backend
 docker compose up -d --build
+docker compose ps
 ```
 
-Esto levanta PostgreSQL 17 en el **puerto 5433** y el servicio OCR local en `127.0.0.1:8091`. Los datos quedan en un volumen con nombre: `docker compose down` no los borra; `docker compose down -v` sí. Consulta [OCR.md](OCR.md) para conocer el procesamiento automático y sus estados.
+Espera a que ambos servicios estén saludables y verifica:
 
-Si prefieres usar tu propio PostgreSQL, crea una base llamada `archivo_sanjose` y configura `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` y `DB_PASSWORD`.
-
-### 2. Correr la aplicación
-
-El default de `application.properties` ya apunta al Postgres de Docker (puerto **5433**), así que con eso alcanza:
-
-```bash
-./mvnw spring-boot:run
+```powershell
+Invoke-RestMethod http://localhost:8091/health
+Invoke-RestMethod http://localhost:8091/v2/jobs/config
 ```
 
-Si en cambio usás tu propio Postgres nativo (normalmente puerto 5432), sobreescribí el puerto con una variable de entorno:
+La primera respuesta debe incluir `status: ok` y **`jobsReady: true`**; la segunda debe devolver configuración, no 404. Si sigue iniciando, consulta `docker compose logs --tail 100 ocr`.
 
-```bash
-# Windows (PowerShell)
-$env:DB_PORT="5432"; ./mvnw spring-boot:run
+## 3. Iniciar la API
 
-# Bash / Git Bash
-DB_PORT=5432 ./mvnw spring-boot:run
+En una terminal ubicada en `archivo_backend`:
+
+```powershell
+.\mvnw.cmd spring-boot:run
 ```
 
-Al arrancar, Flyway crea el esquema completo y siembra un rol `ADMIN` y un usuario administrador (ver credenciales abajo). La app queda escuchando en `http://localhost:8080`.
+En Linux/macOS usa `./mvnw spring-boot:run`, o `sh mvnw spring-boot:run` si el wrapper no tiene permiso de ejecución.
 
-### Variables de entorno (todas opcionales, tienen default para desarrollo)
+Espera el inicio correcto de Spring Boot y Tomcat en **8080**. Flyway crea el esquema en una base vacía o aplica las migraciones pendientes; actualmente existen **V1 a V13**. Hibernate valida el esquema, no lo crea.
 
-| Variable | Default | Para qué |
-|---|---|---|
-| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | `localhost`, `5433`, `archivo_sanjose`, `postgres`, `1234` | Conexión a PostgreSQL |
-| `JWT_SECRET` | un valor de desarrollo, **cambiar en producción** | Clave para firmar los JWT (HMAC-SHA256, mínimo 32 bytes) |
-| `JWT_EXPIRATION_MS` | `28800000` (8 horas) | Vigencia del token |
-| `STORAGE_BASE_DIR` | `./storage/documentos` | Carpeta donde se guardan los documentos digitalizados subidos |
-| `STORAGE_MAX_FILE_SIZE_BYTES` | `20971520` (20 MB) | Tamaño máximo por archivo |
-| `STORAGE_TIPOS_MIME_PERMITIDOS` | `application/pdf,image/jpeg,image/png,image/tiff` | Lista blanca de tipos MIME aceptados al subir un documento |
-| `OCR_ENABLED`, `OCR_URL` | `true`, `http://localhost:8091` | Activación y dirección del servicio OCR local |
-| `OCR_TIMEOUT_SECONDS`, `OCR_REVIEW_THRESHOLD` | `300`, `0.75` | Tiempo máximo y confianza mínima antes de solicitar revisión |
+Abre [Swagger](http://localhost:8080/swagger-ui/index.html). No cierres la terminal. Un endpoint protegido devuelve 401 sin token; eso no significa que la API esté caída.
 
-## Usuario administrador semilla
+### Primer acceso
 
-Para poder usar la API por primera vez (todo excepto `/api/auth/login` requiere estar autenticado):
+La migración [V2__seed_admin.sql](src/main/resources/db/migration/V2__seed_admin.sql) crea el administrador inicial. Consulta sus comentarios **localmente** para los datos de desarrollo y coordina con el responsable si la base ya existía. No publiques esos datos en incidencias o capturas.
 
-```
-correo:    admin@sanjose.gob.pe
-password:  CambiarInmediatamente123!
-```
+Antes de compartir la instalación, crea una cuenta administradora propia y desactiva la cuenta semilla según el procedimiento del equipo. Reiniciar o actualizar no restablece credenciales de una base ya modificada.
 
-Cambiá esta contraseña (o desactivá este usuario y creá uno nuevo) antes de usar esto en un ambiente que no sea de desarrollo.
+Continúa con el [README del frontend](https://github.com/Tade17/archivo_frontend#readme). La API autentica mediante `POST /api/auth/login`; las solicitudes siguientes requieren `Authorization: Bearer <token>`.
 
-## Autenticación
+## Configuración opcional
 
-```
-POST /api/auth/login
-{ "correo": "admin@sanjose.gob.pe", "password": "CambiarInmediatamente123!" }
-```
+Los valores de desarrollo coinciden entre Compose y `application.properties`. **No son una configuración de producción.** PostgreSQL publica el puerto del host en todas las interfaces; OCR está restringido a loopback. No expongas esta configuración directamente a Internet.
 
-Devuelve un JWT. Mandalo en cada request siguiente como:
+| Variables Java | Uso |
+|---|---|
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | PostgreSQL: inicialmente `localhost:5433`, base `archivo_sanjose` |
+| `JWT_SECRET` | Firma JWT: secreto propio de al menos 32 bytes antes de compartir |
+| `JWT_EXPIRATION_MS` | Vigencia del token; inicialmente 8 horas |
+| `STORAGE_BASE_DIR` | Documentos; inicialmente `./storage/documentos`, relativo al directorio de ejecución |
+| `STORAGE_MAX_FILE_SIZE_BYTES`, `STORAGE_TIPOS_MIME_PERMITIDOS` | Límite por archivo y formatos admitidos |
+| `OCR_ENABLED`, `OCR_URL` | Inicialmente `true` y `http://localhost:8091` |
+| `OCR_TIMEOUT_SECONDS`, `OCR_REVIEW_THRESHOLD` | Tiempo de comunicación y confianza mínima |
+| `OCR_ARTIFACT_MAX_BYTES` | PDF OCR derivado; inicialmente 128 MiB |
+| `OCR_POLL_MILLIS`, `OCR_LEASE_SECONDS` | Consulta de cola y vigencia del trabajo reclamado |
 
-```
-Authorization: Bearer <token>
+Define las variables en **la misma terminal que inicia Java**; por ejemplo, para otro PostgreSQL:
+
+```powershell
+$env:DB_PORT = '5432'
+.\mvnw.cmd spring-boot:run
 ```
 
-### Roles y permisos
+En Bash: `DB_PORT=5432 ./mvnw spring-boot:run`. Gestiona los secretos con el mecanismo seguro del equipo, no en archivos versionados ni comandos que vayas a compartir.
 
-- **ADMIN**: acceso total; administra usuarios y catálogos y consulta la actividad de seguridad.
-- **GESTOR_DOCUMENTAL**: crea y edita expedientes y carga documentos. No accede a usuarios, catálogos ni auditoría.
-- **LECTOR**: busca, visualiza y descarga documentos sin modificarlos.
+Un `.env` junto a Compose configura **Compose**, por ejemplo `OCR_HOST_PORT`; **Spring Boot no lo carga automáticamente**. Cambiar ese puerto requiere también configurar `OCR_URL` en la terminal Java. Cambiar `DB_PASSWORD` solo en Java no cambia la contraseña del servidor ni una base ya existente.
 
-Los nombres de rol son datos libres en la tabla `rol`; la convención de autoridad interna es `ROLE_<NOMBRE_EN_MAYUSCULAS>`, así que para que un usuario tenga privilegios de administrador su rol debe llamarse exactamente `ADMIN`.
+## Actualizar sin perder información
 
-## Módulos / endpoints
+Sigue la [guía de actualización](ACTUALIZACION_BD_DOCKER.md): detener Java, respaldar base y documentos, conservar volúmenes, actualizar, reconstruir OCR, comprobar la cola e iniciar Java. Actualiza después la interfaz.
 
-Todos los endpoints están bajo `/api`. Las áreas y los tipos documentales son los catálogos activos de este flujo digital.
+**Nunca uses `docker compose down -v` para actualizar.** Los datos están repartidos entre:
 
-| Recurso | Base path | Notas |
-|---|---|---|
-| Auth | `/api/auth/login` | Único endpoint público |
-| Usuarios | `/api/usuarios` | Paginado. `DELETE` desactiva (no borra) |
-| Roles | `/api/roles` | — |
-| Expedientes | `/api/expedientes` | Paginado. Sin `DELETE`: un expediente nunca se borra, su ciclo de vida se maneja con `EstadoExpediente` |
-| Documentos digitales | `/api/documentos-digitales` | Ver sección de subida de archivos abajo |
-| Auditoría | `/api/auditoria` | Solo lectura, solo ADMIN. Filtros `?entidadAfectada=` + `?entidadId=` |
-| Áreas y tipos documentales | `/api/areas-responsables`, `/api/tipos-documentales` | Catálogos, solo ADMIN para escribir |
+- Base: volumen `archivo_postgres_data`.
+- Originales y PDF derivados: carpeta `STORAGE_BASE_DIR`.
+- Trabajos OCR y puntos de control: volumen `archivo_ocr_artifacts`.
 
-### Paginación
+Un respaldo PostgreSQL **no incluye documentos ni avances OCR**.
 
-Los listados de Expediente, Usuario y Documento Digital devuelven:
+## Carga y OCR automático
 
-```json
-{ "contenido": [...], "pagina": 0, "tamano": 20, "totalElementos": 42, "totalPaginas": 3 }
+1. Selecciona archivos y ordena las imágenes antes de guardar.
+2. Se guarda cada PDF por separado y un único PDF para el grupo de imágenes, conservando sus originales.
+3. La cola persistente procesa en segundo plano; la interfaz muestra estado, fase y páginas procesadas.
+4. El PDF resultante conserva el escaneo y añade texto seleccionable y buscable, no editable.
+5. Reintenta los errores desde el documento existente, sin volver a cargarlo.
+
+La interfaz admite hasta 100 archivos, 20 MB por archivo y 150 MB por lote. El grupo de imágenes y su PDF combinado tienen un límite adicional de 20 MB. El OCR admite hasta 100 páginas y 250 millones de píxeles acumulados: el límite de píxeles puede alcanzarse antes de 100 páginas. Se respetan los límites configurados más bajos. Consulta [OCR.md](OCR.md) para recuperación, capacidad y rendimiento.
+
+## Verificar cambios
+
+Pruebas focalizadas sin base de datos:
+
+```powershell
+.\mvnw.cmd "-Dtest=OcrClientTest,OcrWorkerTest,OcrQueueSchedulerTest,DocumentoImageBatchServiceTest,FileSystemStorageServiceTest" test
 ```
 
-Se controla con query params estándar de Spring Data: `?page=0&size=20&sort=nombre,desc`.
+**No ejecutes la suite Maven completa contra una base compartida o de producción.** Las pruebas de integración usan la conexión PostgreSQL configurada y un contexto con Flyway. Configura primero una base aislada; el rollback no sustituye ese aislamiento.
 
-### Subir documentos digitalizados
+Para comprobar una instalación nueva, valida V1–V13 en una base vacía aislada y realiza una carga sintética completa. Esta guía no certifica que esa prueba ya se haya realizado en tu equipo.
 
-`POST /api/documentos-digitales` es `multipart/form-data` (no JSON) y acepta **uno o varios archivos en el mismo request** (pensado para digitalizar en lote):
+## Problemas frecuentes
 
-```
-POST /api/documentos-digitales
-Content-Type: multipart/form-data
+| Síntoma | Revisión |
+|---|---|
+| Docker no responde | Inicia Docker Desktop y ejecuta `docker version` |
+| Puerto ocupado | Revisa qué proceso lo usa; no inicies una segunda API en el mismo puerto |
+| PostgreSQL no conecta | `docker compose ps`, puerto 5433 y variables `DB_*` de la terminal Java |
+| `/v2/jobs/config` devuelve 404 | Imagen antigua: `docker compose up -d --build ocr`, espera salud y reinicia Java actualizado |
+| Error al iniciar sesión | Revisa qué solicitud falla en Red del navegador y los registros Java |
+| HTTP 401 en login | Credenciales vigentes de esa base; reiniciar no restaura la cuenta semilla |
+| HTTP 500 después del login | Puede fallar una consulta o vista previa posterior, no la autenticación |
+| Flyway falla | Conserva datos y migraciones; no borres volúmenes ni ejecutes `repair` automáticamente |
+| Error de loopback en Windows | Usa primero JDK17; consulta [el diagnóstico específico](OCR.md#problema-de-selector-java-en-windows) |
 
-expedienteId=<uuid>
-tecnicoResponsableId=<uuid>
-escanerUtilizado=Epson V600      (opcional)
-resolucionDpi=300                (opcional)
-formatoSalida=PDF                (opcional)
-archivos=<archivo1.pdf>
-archivos=<archivo2.pdf>
-```
-
-El servidor calcula el hash SHA-256 y valida tipo MIME/tamaño antes de guardar — no se puede mandar la ruta o el hash a mano. `GET /api/documentos-digitales/{id}/archivo` descarga el binario real (y queda registrado en auditoría).
-
-## Documentación interactiva (Swagger)
-
-Con la app corriendo, abrí:
-
-```
-http://localhost:8080/swagger-ui/index.html
-```
-
-Ahí se ve la lista completa de endpoints (generada automáticamente desde el código, no a mano) y se pueden probar directo desde el navegador. Para probar un endpoint protegido: primero `POST /api/auth/login`, copiá el `token` de la respuesta, apretá el botón **Authorize** (arriba a la derecha) y pegalo ahí (sin el prefijo `Bearer`) — Swagger lo va a mandar solo en cada request siguiente.
-
-## Tests
-
-```bash
-./mvnw test
-```
-
-Son tests de integración (contra una Postgres real, la misma que uses en desarrollo) envueltos en una transacción que se revierte al final de cada test — no ensucian la base.
-
-## Estructura del proyecto
-
-```
-controller/    Endpoints REST
-service/       Interfaces de negocio + impl/
-repository/    Spring Data JPA
-entity/        Entidades JPA
-dto/           Request/Response DTOs (records)
-mapper/        Entity <-> DTO
-security/      JWT (filtro, servicio de tokens, UserDetailsService)
-audit/         Aspecto AOP que graba la tabla auditoria
-storage/       Abstracción de almacenamiento de archivos (filesystem local)
-exception/     Excepciones de negocio + GlobalExceptionHandler
-config/        Configuración de Spring Security
-```
+Antes de compartir registros elimina tokens, credenciales y datos de documentos. Un entorno compartido requiere revisar usuarios, secretos, CORS, redes, HTTPS y respaldos; este inicio local no sustituye ese endurecimiento.
