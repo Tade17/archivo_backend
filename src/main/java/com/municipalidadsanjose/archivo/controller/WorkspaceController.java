@@ -137,7 +137,7 @@ public class WorkspaceController {
   @GetMapping("/documentos/{id}/vista")
   @Transactional
   public ResponseEntity<Resource> preview(@PathVariable UUID id,@AuthenticationPrincipal UsuarioPrincipal user){
-    var d=documentos.buscarPorId(id);var resource=storage.cargarComoRecurso(d.pdfDisponible()?pdf.rutaPdf(id):d.rutaAlmacenamiento());
+    var d=documentos.buscarPorId(id);var resource=d.pdfDisponible()?storage.cargarComoRecurso(pdf.rutaPdf(id)):documentos.cargarArchivoOriginal(id);
     audit(user.getId(),"DocumentoDigital",id,"CONSULTAR");
     return ResponseEntity.ok().contentType(d.pdfDisponible()?MediaType.APPLICATION_PDF:MediaType.parseMediaType(d.tipoMime()))
       .header(HttpHeaders.CACHE_CONTROL,"private, no-store")

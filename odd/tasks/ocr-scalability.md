@@ -1,6 +1,6 @@
 # Reliable and recoverable multipage OCR
 
-**Current delivery status: S1-S6 implemented and verified, but NOT activated live. Staging backend launch was rejected by runtime policy before execution. Do not retry through an alternate launcher or bypass.**
+**Current delivery status: S1-S6 implemented/verified. After the historical blocked staging attempt below, the user manually activated V13/new OCR. Workspace original-preview compatibility correction is verified in source but pending commit/manual backend restart; full-flow proof remains pending. No alternate launcher or policy bypass.**
 
 ## Objective and problem
 Deliver large searchable PDFs without Base64 response expansion, process long documents with recoverable page checkpoints, and measure throughput before tuning. The latest OCR HTTP 200 was followed by invalid-response parsing; an oversized Jackson string was reproduced, but the original exception was not retained.
@@ -173,7 +173,7 @@ git diff --check
 
 - Authored S6 count: 378 additions plus deletions including documentation and untracked harness/tests (306 harness/test lines), generated benchmark outputs excluded. One coherent measured-tuning unit with its reproducible harness, bounded configuration and fingerprint regressions; no artificial split required below advisory400.
 
-## Activation checkpoint: blocked, not deployed
+## Historical activation checkpoint: blocked, not deployed at that time
 - Work-unit commits: S1 5321588, S2 9d3969a, S3 b5e9b36, S4 fd5a862, compatibility fix f1c7261, S6 aec4ee9; frontend S5 2fb143d. Backend parent79Python GREEN and frontend parent37UI GREEN. Native backend5514/frontend849 lines, both medium/review_due=false/under_budget. Review boundaries main remain pending; assessments are not approval. Branches fix/ocr-image-upload, main untouched, no push/PR/merge.
 - Fresh pre-V13 backup: C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-scalability/archivo_sanjose-pre-v13-20261014-163114.dump; 57018 bytes, PGDMP,112 entries, SHA256 18471abd3c3a9211f78533e0ced0bb3081d1a83ffd828056d257a6bef20e72c5. Full production V12 schema restored into disposable isolated PostgreSQL; staged OCR jobs service ready/healthy. This is restore/readiness proof, not V13/full-stack proof.
 - Hidden staged backend Start-Process rejected BEFORE execution by runtime policy. No application startup, no staged V13 migration, no asynchronous full-stack chain, no live cutover. No alternate launch or retry attempted. Exact owned stage containers verified by labels and removed; cleanup record C:/Users/Bienvenido/OneDrive/Documentos/SistemaDeBusqueda2.0/output/backups/ocr-scalability/staging-cleanup.json.
@@ -186,3 +186,18 @@ git diff --check
 4. Verify authenticated new UI/page progress and desktop/mobile behavior after approved activation, retaining every pending/skipped check until observed.
 
 Implementation checkboxes stay complete; the user's deployment outcome remains incomplete. No functional test rerun for this documentation-only checkpoint; structural readback and git diff --check only. Memory mirror pending ambiguous provider/no-save request.
+
+## S4b compatibility correction: workspace original preview
+- [x] Reproduce and correct the remaining DTO-path consumer in WorkspaceController.preview. Route delegated direct: controller plus nontrivial regression tests. Commit, parent check and manual backend restart pending; no frontend/DTO/security configuration changes.
+- Root cause owned by S4: sanitizing rutaAlmacenamiento to null was correct, but workspace preview still passed that public field to storage for original fallback. The f1c7261 original-download correction missed this separate preview route. The parent impact audit identified this as the sole remaining sanitized DTO consumer. Real mapper + entity-backed real service/filesystem reproduced Path.resolve(null) at WorkspaceController140. This proves the backend failure; no browser modal/network exception was captured by this writer.
+- Fix: original fallback uses documentos.cargarArchivoOriginal(id); generated branch still resolves pdf.rutaPdf(id) through storage. Private public DTO path remains null; route, transaction, CONSULTAR audit, content type, inline filename, private/no-store header, authentication/CORS configuration unchanged.
+- RED: focused WorkspaceControllerTest observed3tests/1error, original-preview NullPointerException; generated branch and real SecurityConfig anonymous401 passed. Initial test attempt also left a generated resource stream open, causing Windows temporary-file cleanup error; corrected with try-with-resources before the clean behavioral RED. That fixture issue is not application RED.
+- GREEN after normalized source: exact command below passed94tests, zero failures/errors/skips,24.663-second runner (3workspace,6document-controller,46client,12worker,6scheduler,16image-batch,5storage). Original/generated response bytes, real mapper null path, audit/headers and actual anonymous security-chain rejection verified without live network/database.
+
+```powershell
+.\mvnw.cmd "-Dtest=WorkspaceControllerTest,DocumentoDigitalControllerTest,OcrClientTest,OcrWorkerTest,OcrQueueSchedulerTest,DocumentoImageBatchServiceTest,FileSystemStorageServiceTest" test
+```
+
+- Current parent-reported read-only runtime evidence supersedes only the historical deployment state, not prior failed/skipped observations: user manually activated V13/new OCR; authentication POST200, catalog/search200, OCR jobsReady/config200. First selected search result requires original preview fallback. No user credentials/token saved here; no OCR retry/user-source mutation by this writer. New generated/full asynchronous flow and mobile QA remain unproven.
+- This writer did not restart/launch any service or bypass runtime policy. Current running backend must be manually stopped/restarted after parent accepts the correction; do not assume source compilation proves loaded runtime bytes. Earlier rejected staging launch remains historical evidence.
+- Final git diff --check/structural readback passed. Rollback surface only WorkspaceController original-resource branch, WorkspaceControllerTest and this evidence; do not restore public private paths. Local mirror remains pending ambiguity/no-save request.
