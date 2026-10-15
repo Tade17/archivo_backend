@@ -36,6 +36,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
     private final DocumentoDigitalRepository documentoDigitalRepository;
     private final PrestamoRepository prestamoRepository;
     private final FileStorageService fileStorageService;
+    private final tools.jackson.databind.ObjectMapper objectMapper;
 
     public ExpedienteServiceImpl(ExpedienteRepository expedienteRepository,
                                   AreaResponsableRepository areaResponsableRepository,
@@ -47,7 +48,8 @@ public class ExpedienteServiceImpl implements ExpedienteService {
                                   ExpedienteMapper expedienteMapper,
                                   DocumentoDigitalRepository documentoDigitalRepository,
                                   PrestamoRepository prestamoRepository,
-                                  FileStorageService fileStorageService) {
+                                  FileStorageService fileStorageService,
+                                  tools.jackson.databind.ObjectMapper objectMapper) {
         this.expedienteRepository = expedienteRepository;
         this.areaResponsableRepository = areaResponsableRepository;
         this.tipoDocumentalRepository = tipoDocumentalRepository;
@@ -59,6 +61,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         this.documentoDigitalRepository = documentoDigitalRepository;
         this.prestamoRepository = prestamoRepository;
         this.fileStorageService = fileStorageService;
+        this.objectMapper = objectMapper;
     }
 
     // Un contenedor COMPLETADO ya tiene todos sus documentos: para agregar uno
@@ -180,6 +183,10 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         for (DocumentoDigital d : documentos) {
             fileStorageService.eliminar(d.getRutaAlmacenamiento());
             if (d.getRutaPdf() != null) fileStorageService.eliminar(d.getRutaPdf());
+            // Imágenes originales conservadas cuando se unieron en un solo PDF.
+            com.municipalidadsanjose.archivo.service.DocumentoImageBatchService
+                    .readManifest(d, objectMapper)
+                    .forEach(original -> fileStorageService.eliminar(original.rutaAlmacenamiento()));
         }
     }
 

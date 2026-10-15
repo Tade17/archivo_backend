@@ -1,0 +1,8 @@
+target/
+storage/
+config/
+.env
+.git/
+*.log
+ocr_service/
+odd/

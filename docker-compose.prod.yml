@@ -1,0 +1,87 @@
+# Despliegue completo: base de datos + OCR + backend + frontend.
+#
+#   1. Clona archivo-backend y archivo-frontend UNO AL LADO DEL OTRO.
+#   2. En archivo-backend: copia .env.example a .env y complétalo.
+#   3. docker compose -f docker-compose.prod.yml up -d --build
+#      (o pon COMPOSE_FILE=docker-compose.prod.yml en el .env y usa solo
+#       "docker compose up -d --build").
+#
+# Solo el puerto web (APP_PORT) queda expuesto. Base de datos y OCR son
+# internos. Los datos viven en volúmenes con nombre: "down" no los borra,
+# "down -v" sí (no lo uses en producción).
+name: archivo-municipal
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: archivo_sanjose
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Define DB_PASSWORD en el .env}
+    volumes:
+      - archivo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d archivo_sanjose"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ocr:
+    build:
+      context: ./ocr_service
+    restart: unless-stopped
+    environment:
+      OCR_MAX_BYTES: "26214400"
+      OCR_MAX_PAGES: "100"
+      OCR_PDF_DPI: "220"
+      OCR_ORT_INTRA_THREADS: ${OCR_ORT_INTRA_THREADS:-2}
+      OCR_ORT_INTER_THREADS: "1"
+      OCR_ARTIFACT_DIR: "/var/lib/archivo-ocr/artifacts"
+      OCR_ARTIFACT_MAX_BYTES: "134217728"
+      OCR_ARTIFACT_TOTAL_BYTES: "536870912"
+      OCR_ARTIFACT_MAX_COUNT: "32"
+      OCR_ARTIFACT_TTL_SECONDS: "3600"
+    volumes:
+      - archivo_ocr_artifacts:/var/lib/archivo-ocr/artifacts
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8091/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  backend:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ocr:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: archivo_sanjose
+      DB_USER: postgres
+      DB_PASSWORD: ${DB_PASSWORD:?Define DB_PASSWORD en el .env}
+      JWT_SECRET: ${JWT_SECRET:?Define JWT_SECRET en el .env (32 caracteres o más)}
+      OCR_URL: http://ocr:8091
+      STORAGE_BASE_DIR: /data/documentos
+    volumes:
+      - archivo_documentos:/data/documentos
+
+  frontend:
+    build:
+      context: ../archivo-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${APP_PORT:-80}:80"
+
+volumes:
+  archivo_postgres_data:
+  archivo_ocr_artifacts:
+  archivo_documentos:
