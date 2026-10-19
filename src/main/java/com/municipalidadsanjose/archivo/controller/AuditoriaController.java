@@ -9,8 +9,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.UUID;
 
-// Solo lectura a propósito: los registros los crea el aspecto AOP, no un cliente.
-// Acceso restringido a administradores y gestores documentales.
 @PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/auditoria")

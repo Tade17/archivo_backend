@@ -4,9 +4,6 @@ import org.springframework.data.domain.Page;
 
 import java.util.List;
 
-// Envoltorio propio en vez de devolver Page<T> directo: evita depender de cómo
-// Spring Data serializa Page (formato distinto según versión de Jackson) y deja
-// un contrato JSON estable y explícito para el cliente.
 public record PaginaResponseDTO<T>(
         List<T> contenido,
         int pagina,

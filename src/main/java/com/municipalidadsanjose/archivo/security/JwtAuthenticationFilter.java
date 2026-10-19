@@ -55,10 +55,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
         } catch (JwtException | IllegalArgumentException | UsernameNotFoundException ex) {
-            // Token inválido/expirado/mal formado, o el correo del token ya no existe
-            // como usuario: se ignora y la request sigue sin autenticar, dejando que
-            // el filtro de autorización responda 401/403. Se loguea para poder
-            // diagnosticar (antes esto fallaba en silencio, sin ningún rastro).
             log.debug("Token JWT rechazado en {} {}: {}", request.getMethod(), request.getRequestURI(), ex.getMessage());
             SecurityContextHolder.clearContext();
         }

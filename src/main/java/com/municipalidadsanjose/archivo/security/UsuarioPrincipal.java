@@ -9,8 +9,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
-// Adapta Usuario al contrato que Spring Security necesita para autenticar y
-// autorizar, sin ensuciar la entidad de dominio con métodos de UserDetails.
 public class UsuarioPrincipal implements UserDetails {
 
     private final Usuario usuario;
@@ -29,8 +27,7 @@ public class UsuarioPrincipal implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        // Convención: el nombre del Rol en base de datos se expone como autoridad
-        // "ROLE_<NOMBRE_EN_MAYUSCULAS>" (espacios -> "_") para usar hasRole(...) en @PreAuthorize.
+        // "Gestor Documental" -> ROLE_GESTOR_DOCUMENTAL
         String autoridad = "ROLE_" + usuario.getRol().getNombre()
                 .trim()
                 .toUpperCase()

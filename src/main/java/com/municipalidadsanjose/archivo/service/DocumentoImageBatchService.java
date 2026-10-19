@@ -45,7 +45,6 @@ public class DocumentoImageBatchService {
         if (files == null || files.isEmpty() || files.size() > 100) {
             throw new SolicitudInvalidaException("Selecciona entre 1 y 100 archivos.");
         }
-        // Validate signatures and total bounds before any filesystem writes.
         List<MultipartFile> validated = new ArrayList<>();
         long totalImages = 0;
         for (MultipartFile file : files) {

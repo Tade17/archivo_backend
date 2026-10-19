@@ -17,7 +17,6 @@ import org.springframework.web.bind.annotation.*;
 import java.time.*;
 import java.util.*;
 
-/** Consultas de la mesa de archivo; las escrituras reutilizan los servicios auditados. */
 @RestController
 @RequestMapping("/api/workspace")
 public class WorkspaceController {
@@ -118,8 +117,7 @@ public class WorkspaceController {
   @Transactional
   public Map<String,Object> edit(@PathVariable UUID id,@Valid @RequestBody Reception r,@AuthenticationPrincipal UsuarioPrincipal user){
     var original=detail(id);
-    // Mover el documento a otro contenedor sigue la misma regla que registrarlo:
-    // un contenedor completado hay que reabrirlo antes de agregarle documentos.
+    // Un contenedor completado debe reabrirse antes de agregarle documentos.
     if(!r.contenedorId().equals(original.get("contenedorId"))){
       var estado=db.queryForList("SELECT estado_digitalizacion FROM contenedor WHERE contenedor_id=?",String.class,r.contenedorId());
       if(estado.isEmpty())throw new RecursoNoEncontradoException("Contenedor",r.contenedorId());

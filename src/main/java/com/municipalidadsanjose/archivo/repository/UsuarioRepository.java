@@ -12,8 +12,7 @@ public interface UsuarioRepository extends JpaRepository<Usuario, UUID> {
     boolean existsByCorreo(String correo);
     boolean existsByRolId(UUID rolId);
 
-    // join fetch: sin esto, usuario.getRol() revienta con LazyInitializationException
-    // al leerse fuera de una transacción (ej. en UsuarioDetailsService, con open-in-view=false).
+    // join fetch del rol: con open-in-view=false se lee fuera de la transacción.
     @Query("select u from Usuario u join fetch u.rol where u.correo = :correo")
     Optional<Usuario> findByCorreoConRol(String correo);
 }

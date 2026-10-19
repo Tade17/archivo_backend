@@ -1,7 +1,6 @@
 package com.municipalidadsanjose.archivo.enums;
 
-// Lo decide el usuario, no se calcula: PENDIENTE mientras falten documentos del
-// contenedor por subir; COMPLETADO cuando ya se subieron todos.
+// Lo marca el usuario; no se calcula por cantidad de documentos.
 public enum EstadoDigitalizacion {
     PENDIENTE,
     COMPLETADO

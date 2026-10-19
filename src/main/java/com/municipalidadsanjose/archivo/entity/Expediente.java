@@ -36,11 +36,9 @@ public class Expediente {
     @Column(nullable = false, length = 255)
     private String remitente;
 
-    // Opcional: no todos los documentos tienen un destinatario escrito.
     @Column(length = 255)
     private String destinatario;
 
-    // Área a la que va dirigido el documento.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "area_destino_id", nullable = false)
     private AreaResponsable areaDestino;
@@ -53,20 +51,16 @@ public class Expediente {
     @JoinColumn(name = "estado_id", nullable = false)
     private EstadoExpediente estado;
 
-    // Fecha del documento físico original (la ingresa el archivista a mano).
-    // No confundir con fechaRegistro: esta NO se autogenera.
+    // Fecha del documento original; la ingresa el usuario (no es fechaRegistro).
     @Column(name = "fecha_documento", nullable = false)
     private LocalDate fechaDocumento;
 
     @Column(nullable = false, length = 500)
     private String asunto;
 
-    // Resumen/cuerpo del documento: manual al inicio, luego vía OCR/IA.
     @Column(columnDefinition = "TEXT")
     private String glosa;
 
-    // Archivador o folder físico que lo contiene; su ubicación (Sección/Nivel/
-    // Área) se obtiene a través del contenedor.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "contenedor_id", nullable = false)
     private Contenedor contenedor;
@@ -78,7 +72,6 @@ public class Expediente {
     @JoinColumn(name = "creado_por_id", nullable = false)
     private Usuario creadoPor;
 
-    // Timestamp real de inserción del registro (automático, distinto de fechaDocumento).
     @CreationTimestamp
     @Column(name = "fecha_registro", updatable = false, nullable = false)
     private LocalDateTime fechaRegistro;

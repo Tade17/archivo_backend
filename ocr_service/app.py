@@ -83,13 +83,12 @@ def bounded_request(lock):
             try:
                 return await asyncio.shield(task)
             except asyncio.CancelledError:
-                # to_thread cancellation does not stop inference; retain admission until it ends.
+                # to_thread no cancela la inferencia: el lock se mantiene hasta que termine.
                 while not task.done():
                     try:
                         await asyncio.shield(task)
                     except asyncio.CancelledError:
                         continue
-                # Retrieve an error without disclosing it or leaving an unobserved task.
                 if not task.cancelled():
                     task.exception()
                 raise
@@ -105,8 +104,7 @@ class MetadataLimitError(ValueError):
 
 @lru_cache(maxsize=1)
 def get_engine() -> RapidOCR:
-    # Misma familia usada por ImageTrans: detección PaddleOCR, clasificación de
-    # orientación y reconocimiento latino PP-OCRv5 ejecutados localmente con ONNX.
+    # Detección PaddleOCR y reconocimiento latino PP-OCRv5, local con ONNX.
     return RapidOCR(
         params={
             "Global.text_score": 0.45,
@@ -199,7 +197,6 @@ def iter_render_pages(data: bytes, content_type: str, filename: str, start_page:
 
 
 def render_pages(data: bytes, content_type: str, filename: str) -> list[Image.Image]:
-    # Compatibility helper for callers needing independent images, not the OCR path.
     copies = []
     try:
         with closing(iter_render_pages(data, content_type, filename)) as pages:
@@ -422,7 +419,6 @@ async def ocr(
 @app.post("/pdf")
 @bounded_request(_processing_lock)
 async def regenerate_pdf(request: Request) -> Response:
-    # Bound the JSON envelope as well as the decoded original before rendering it.
     body = await bounded_body(request, MAX_BYTES * 2 + 12_000_000)
     if len(body) > MAX_BYTES * 2 + 12_000_000:
         raise HTTPException(status_code=413, detail="La solicitud supera el tamaño permitido")
@@ -488,7 +484,7 @@ def combine_images(files: object) -> bytes:
             total_bytes += len(data)
             if not data or total_bytes > IMAGE_BATCH_MAX_BYTES:
                 raise ValueError("Las imágenes están vacías o superan el tamaño máximo permitido")
-            # Decode actual image headers; client MIME and extension are not authority.
+            # Se decodifica la cabecera real; el MIME y la extensión del cliente no cuentan.
             with Image.open(io.BytesIO(data)) as image:
                 if image.format not in {"PNG", "JPEG", "TIFF"}:
                     raise ValueError("Solo se permiten imágenes PNG, JPEG o TIFF")
@@ -514,7 +510,6 @@ def combine_images(files: object) -> bytes:
 @app.post("/images/pdf")
 @bounded_request(_processing_lock)
 async def image_batch_pdf(request: Request) -> Response:
-    # Bound the envelope while reading, before JSON/base64 allocations.
     max_envelope = 4 * ((IMAGE_BATCH_MAX_BYTES + 2) // 3) + 100_000
     body = bytearray()
     async for chunk in request.stream():
@@ -531,7 +526,6 @@ async def image_batch_pdf(request: Request) -> Response:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except Exception as error:
         raise HTTPException(status_code=422, detail="No se pudo unir las imágenes en PDF") from error
-# Durable job configuration deliberately excludes document names and secret capabilities.
 @lru_cache(maxsize=1)
 def engine_fingerprint():
     config = {'schema': 1, 'rapidocr': version('rapidocr'), 'onnxruntime': version('onnxruntime'),
@@ -557,7 +551,6 @@ def get_job_store():
 
 
 def source_page_count(data):
-    # Actual signature, not uploaded MIME/name, determines durable source handling.
     if data.startswith(b'%PDF-'):
         document = pdfium.PdfDocument(data)
         try:
@@ -656,7 +649,6 @@ async def submit_job(job_id: str, request: Request,
                      x_job_capability: str | None = Header(default=None),
                      x_source_sha256: str | None = Header(default=None),
                      x_ocr_fingerprint: str | None = Header(default=None)):
-    # Validate opaque identity and capability before accepting a body.
     if not re.fullmatch(r'[a-f0-9]{32}', job_id) or not isinstance(x_job_capability, str) or not re.fullmatch(r'[a-f0-9]{64}', x_job_capability):
         raise HTTPException(status_code=404, detail='OCR_JOB_UNAVAILABLE')
     if x_ocr_fingerprint != engine_fingerprint():

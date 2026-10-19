@@ -13,9 +13,6 @@ public class OpenApiConfig {
 
     private static final String ESQUEMA_JWT = "bearerAuth";
 
-    // Declara el esquema de seguridad para que Swagger UI muestre el botón
-    // "Authorize": ahí se pega el JWT (sin el prefijo "Bearer ") una sola vez,
-    // y Swagger lo agrega automáticamente a cada "Try it out" siguiente.
     @Bean
     public OpenAPI archivoOpenAPI() {
         return new OpenAPI()

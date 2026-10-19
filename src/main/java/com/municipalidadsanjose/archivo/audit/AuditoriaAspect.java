@@ -16,9 +16,6 @@ import org.springframework.stereotype.Component;
 import java.lang.reflect.Method;
 import java.util.UUID;
 
-// Productor real de la tabla auditoria: intercepta cada método @Auditable de los
-// *ServiceImpl (crear/actualizar/eliminar/etc.) y, si termina sin excepción,
-// graba quién hizo qué sobre qué entidad. Antes de esto la tabla nunca se llenaba.
 @Aspect
 @Component
 public class AuditoriaAspect {
@@ -37,16 +34,12 @@ public class AuditoriaAspect {
     public void registrar(JoinPoint joinPoint, Auditable auditable, Object resultado) {
         UUID usuarioId = usuarioAutenticadoId();
         if (usuarioId == null) {
-            // No debería pasar: todo endpoint de escritura exige autenticación.
-            // Si pasa (ej. un proceso interno sin contexto de seguridad), no se
-            // audita en vez de reventar la operación de negocio por esto.
             log.warn("No se pudo auditar {} sobre {}: no hay usuario autenticado en el contexto",
                     auditable.accion(), auditable.entidad());
             return;
         }
 
-        // Métodos void (eliminar/desactivar) no tienen resultado: el id afectado
-        // es el primer argumento. Los que sí devuelven un *ResponseDTO usan su id().
+        // Métodos void: el id afectado es el primer argumento.
         UUID entidadId = resultado == null
                 ? primerArgumentoUUID(joinPoint)
                 : idDelResultado(resultado);
@@ -77,7 +70,6 @@ public class AuditoriaAspect {
         return (args.length > 0 && args[0] instanceof UUID id) ? id : null;
     }
 
-    // Todos los *ResponseDTO son records con un accessor id() como primer componente.
     private UUID idDelResultado(Object resultado) {
         if (resultado == null) {
             return null;

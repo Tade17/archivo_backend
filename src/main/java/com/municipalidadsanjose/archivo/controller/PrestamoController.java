@@ -14,12 +14,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-/**
- * Préstamos físicos a entidades externas. Solo administrador y gestor documental:
- * es información sensible. Las lecturas van por SQL para calcular el semáforo
- * en la misma consulta: rojo si venció y no volvió, amarillo si vence en 2 días
- * o menos, verde en plazo, gris si ya fue devuelto.
- */
 @RestController
 @RequestMapping("/api/workspace/prestamos")
 @PreAuthorize("hasAnyRole('ADMIN','GESTOR_DOCUMENTAL')")
@@ -86,7 +80,6 @@ public class PrestamoController {
         var values = new ArrayList<>(args);
         values.add(size);
         values.add(page * size);
-        // Los sin devolver primero, y entre ellos los que vencen antes.
         var contenido = db.queryForList("SELECT " + COLUMNS + " " + where
                 + " ORDER BY (p.estado = 'DEVUELTO'),"
                 + " CASE WHEN p.estado = 'PRESTADO' THEN p.fecha_devolucion_prevista END ASC,"
@@ -95,7 +88,6 @@ public class PrestamoController {
                 "totalElementos", total, "totalPaginas", (total + size - 1) / size);
     }
 
-    /** Contadores para la alerta: sin devolver, por vencer y vencidos. */
     @GetMapping("/resumen")
     public Map<String, Object> resumen() {
         return db.queryForMap("""

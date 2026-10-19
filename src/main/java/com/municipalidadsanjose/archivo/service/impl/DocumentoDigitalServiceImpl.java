@@ -62,9 +62,7 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         Usuario tecnicoResponsable = usuarioRepository.findById(dto.tecnicoResponsableId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.tecnicoResponsableId()));
 
-        // flush explícito: sin esto, fechaDigitalizacion/fechaActualizacion (generadas por
-        // Hibernate con @CreationTimestamp/@UpdateTimestamp) quedan null en la respuesta,
-        // porque el INSERT recién se ejecuta al hacer commit, no al llamar a save().
+        // flush para que la respuesta incluya las fechas generadas por Hibernate.
         DocumentoDigital guardado = documentoDigitalRepository.saveAndFlush(
                 documentoDigitalMapper.toEntity(dto, expediente, tecnicoResponsable));
         ocrService.solicitar(guardado.getId());
@@ -78,10 +76,6 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         DocumentoDigital documento = documentoDigitalRepository.findById(id)
                 .orElseThrow(() -> new RecursoNoEncontradoException("DocumentoDigital", id));
 
-        // El expedienteId no se reasigna en un update: un documento digitalizado
-        // pertenece al expediente con el que se creó, no se "muda" de expediente.
-        // Tampoco se reasignan rutaAlmacenamiento/tipoMime/hashSha256: quedan
-        // fijados por el archivo real subido en crear(), no son editables a mano.
         Usuario tecnicoResponsable = usuarioRepository.findById(dto.tecnicoResponsableId())
                 .orElseThrow(() -> new RecursoNoEncontradoException("Usuario", dto.tecnicoResponsableId()));
 
@@ -91,8 +85,6 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         documento.setResolucionDpi(dto.resolucionDpi());
         documento.setFormatoSalida(dto.formatoSalida());
 
-        // idem que en crear(): sin flush, fechaActualizacion en la respuesta
-        // muestra el valor viejo en vez del que Hibernate acaba de generar.
         documentoDigitalRepository.flush();
         return documentoDigitalMapper.toResponseDTO(documento);
     }
@@ -126,10 +118,7 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         return fileStorageService.cargarComoRecurso(documento.getRutaAlmacenamiento());
     }
 
-    // No es readOnly a propósito: aunque el método en sí solo lee, @Auditable
-    // graba una fila de auditoría dentro de esta misma transacción, y con
-    // readOnly=true Hibernate pone el flush en modo manual y ese INSERT nunca
-    // se escribe (se pierde en silencio, sin ninguna excepción).
+    // Sin readOnly: con readOnly el INSERT de @Auditable no se escribe.
     @Override
     @Transactional
     @Auditable(entidad = "DocumentoDigital", accion = AccionAuditoria.DESCARGAR)
@@ -150,7 +139,7 @@ public class DocumentoDigitalServiceImpl implements DocumentoDigitalService {
         if (documento.getRutaPdf() != null) paths.add(documento.getRutaPdf());
         DocumentoImageBatchService.readManifest(documento, objectMapper)
                 .forEach(original -> paths.add(original.rutaAlmacenamiento()));
-        // Never remove originals before the database deletion commits.
+        // Los archivos se borran recién después del commit.
         if (!TransactionSynchronizationManager.isActualTransactionActive()
                 || !TransactionSynchronizationManager.isSynchronizationActive()) {
             throw new IllegalStateException("La eliminación requiere una transacción activa.");

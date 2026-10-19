@@ -56,9 +56,7 @@ public class UsuarioServiceImpl implements UsuarioService {
         String passwordHash = passwordEncoder.encode(dto.password());
         Usuario usuario = usuarioMapper.toEntity(dto, rol, passwordHash);
 
-        // flush explícito: sin esto, fechaCreacion/fechaActualizacion (generadas por
-        // Hibernate con @CreationTimestamp/@UpdateTimestamp) quedan null en la respuesta,
-        // porque el INSERT recién se ejecuta al hacer commit, no al llamar a save().
+        // flush para que la respuesta incluya las fechas generadas por Hibernate.
         Usuario guardado = usuarioRepository.saveAndFlush(usuario);
         return usuarioMapper.toResponseDTO(guardado);
     }
@@ -88,11 +86,7 @@ public class UsuarioServiceImpl implements UsuarioService {
             usuario.setPasswordHash(passwordEncoder.encode(dto.password()));
         }
 
-        // No hace falta usuarioRepository.save(usuario): al estar "usuario" gestionado
-        // dentro de esta transacción, Hibernate detecta los cambios (dirty checking)
-        // y los persiste solo al hacer commit, sin que lo pidamos explícitamente.
-        // Sí hace falta el flush: sin él, fechaActualizacion en la respuesta muestra
-        // el valor viejo en vez del que Hibernate acaba de generar.
+        // flush para devolver la fechaActualizacion ya generada.
         usuarioRepository.flush();
         return usuarioMapper.toResponseDTO(usuario);
     }

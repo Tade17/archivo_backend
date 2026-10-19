@@ -17,9 +17,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Cubre @PreAuthorize por rol, las reglas de negocio de RolServiceImpl
-// (duplicado, "en uso") y que AuditoriaAspect efectivamente grabe las
-// operaciones — antes de este aspecto, la tabla auditoria nunca se llenaba.
 class RolIntegrationTest extends IntegrationTestBase {
 
     @Autowired

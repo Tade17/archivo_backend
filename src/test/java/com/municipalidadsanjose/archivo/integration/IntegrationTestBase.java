@@ -17,13 +17,7 @@ import java.util.UUID;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Levanta el contexto completo (seguridad, AOP de auditoría, Flyway) contra la
-// base Postgres real del proyecto (misma que se usa en desarrollo), y envuelve
-// cada test en una transacción que se revierte al final: no ensucia datos.
-// No usa Testcontainers porque el esquema depende de extensiones/funciones
-// específicas de Postgres (uuid-ossp, jsonb) y el entorno no tiene el daemon
-// de Docker corriendo; si en el futuro se agrega, esta clase es el punto único
-// para migrar la configuración de datasource.
+// Usa la base Postgres de desarrollo; cada test se revierte al terminar.
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.MOCK,
         properties = "app.ocr.enabled=false")
@@ -48,19 +42,12 @@ public abstract class IntegrationTestBase {
         return UUID.randomUUID().toString().substring(0, 8);
     }
 
-    // Reutiliza el rol ADMIN sembrado por la migración V2 (no se puede crear otro
-    // con ese mismo nombre: es único). Los tests que necesitan un usuario con
-    // autoridad real ROLE_ADMIN cuelgan un usuario nuevo de este rol compartido.
     protected Rol obtenerRolAdmin() {
         return rolRepository.findByNombre("ADMIN")
                 .orElseThrow(() -> new IllegalStateException(
                         "Falta el rol ADMIN sembrado por V2__seed_admin.sql; ¿corrió Flyway?"));
     }
 
-    // Igual que obtenerRolAdmin, pero para los demás roles sembrados por Flyway
-    // (ARCHIVISTA, DIGITALIZACION, CONSULTA en V3): las reglas de SecurityConfig
-    // son por rol específico, así que un rol de prueba con nombre arbitrario
-    // (ver crearRol) no tiene ninguna autoridad concedida.
     protected Rol obtenerRol(String nombre) {
         return rolRepository.findByNombre(nombre)
                 .orElseThrow(() -> new IllegalStateException(
@@ -84,8 +71,6 @@ public abstract class IntegrationTestBase {
         return usuarioRepository.save(usuario);
     }
 
-    // Crea toda la cadena de dependencias mínima para poder crear un Expediente:
-    // AreaResponsable -> TipoDocumental -> EstadoExpediente -> ArchivoCentral -> Estante -> Nivel -> Caja.
     protected Caja crearCajaConJerarquia() {
         AreaResponsable area = new AreaResponsable();
         area.setNombre("Area_" + sufijoUnico());
@@ -112,7 +97,6 @@ public abstract class IntegrationTestBase {
         return cajaRepository.save(caja);
     }
 
-    // Archivador PENDIENTE dentro de una ubicación nueva: lo mínimo para registrar documentos.
     protected Contenedor crearContenedor(Usuario creador) {
         Contenedor contenedor = new Contenedor();
         contenedor.setCaja(crearCajaConJerarquia());

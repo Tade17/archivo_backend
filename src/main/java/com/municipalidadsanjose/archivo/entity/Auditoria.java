@@ -31,8 +31,7 @@ public class Auditoria {
     @JoinColumn(name = "usuario_id", nullable = false)
     private Usuario usuario;
 
-    // Nombre de la entidad afectada (p.ej. "Expediente", "DocumentoDigital").
-    // No es una FK real porque entidad_id puede apuntar a cualquier tabla.
+    // No es FK: entidad_id puede apuntar a cualquier tabla.
     @Column(name = "entidad_afectada", nullable = false, length = 50)
     private String entidadAfectada;
 

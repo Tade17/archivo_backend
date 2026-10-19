@@ -168,7 +168,6 @@ def run_case(pages, mode, threads):
     retained = []
     try:
         if mode == 'baseline':
-            # Explicit pre-streaming-style eager rasters and background redraw, same current engine/layout.
             retained = app.render_pages(source, 'application/pdf', 'synthetic.pdf')
             def retained_iterator(*_):
                 yield from retained

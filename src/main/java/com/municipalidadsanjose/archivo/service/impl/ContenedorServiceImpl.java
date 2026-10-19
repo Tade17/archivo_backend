@@ -67,8 +67,6 @@ public class ContenedorServiceImpl implements ContenedorService {
         return toResponse(contenedorRepository.saveAndFlush(contenedor));
     }
 
-    // Lo decide el usuario cuando terminó de subir todos los documentos del
-    // contenedor; no se calcula a partir de la cantidad de documentos.
     @Override
     @Transactional
     @Auditable(entidad = "Contenedor", accion = AccionAuditoria.MODIFICAR)
@@ -82,7 +80,6 @@ public class ContenedorServiceImpl implements ContenedorService {
         return toResponse(contenedorRepository.saveAndFlush(contenedor));
     }
 
-    // Para cuando aparece un documento que faltaba después de haberlo completado.
     @Override
     @Transactional
     @Auditable(entidad = "Contenedor", accion = AccionAuditoria.MODIFICAR)
@@ -92,8 +89,6 @@ public class ContenedorServiceImpl implements ContenedorService {
         return toResponse(contenedorRepository.saveAndFlush(contenedor));
     }
 
-    // Solo contenedores vacíos (ej. creado por error): un documento registrado
-    // nunca queda sin contenedor.
     @Override
     @Transactional
     @Auditable(entidad = "Contenedor", accion = AccionAuditoria.ELIMINAR)

@@ -7,8 +7,6 @@ import org.springframework.data.domain.Pageable;
 
 import java.util.UUID;
 
-// eliminar() es solo para corregir registros hechos por error: lo ejecuta el
-// administrador y queda en auditoría.
 public interface ExpedienteService {
     ExpedienteResponseDTO crear(ExpedienteRequestDTO dto);
     ExpedienteResponseDTO actualizar(UUID id, ExpedienteRequestDTO dto);

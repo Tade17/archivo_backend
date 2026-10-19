@@ -17,8 +17,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Préstamos a entidades externas: de un documento o de un contenedor completo,
-// con semáforo por vencimiento y solo para administrador / gestor documental.
 class PrestamoIntegrationTest extends IntegrationTestBase {
 
     @Autowired JdbcTemplate db;

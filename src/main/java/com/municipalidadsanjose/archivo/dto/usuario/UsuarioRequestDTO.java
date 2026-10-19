@@ -14,8 +14,7 @@ public record UsuarioRequestDTO(
         @Email(message = "El correo no tiene un formato válido")
         String correo,
 
-        // Sin @NotBlank a propósito: en actualizar() es opcional (no reescribe la
-        // contraseña si viene vacío); en crear() se exige a mano en el Service.
+        // Opcional al actualizar; al crear se exige en el Service.
         String password,
 
         @NotNull(message = "El rol es obligatorio")

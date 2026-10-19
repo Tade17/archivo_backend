@@ -45,8 +45,7 @@ class SearchablePdfTests(unittest.TestCase):
         image = self.pages[0]
         ImageDraw.Draw(image).text((100, 200), "Original scanned document", fill="black")
         data = build_pdf([image], self.layout[:1])
-        # PDFium's fractional-page rounding can resample even a lossless raster.
-        # Verify stored RGB bytes directly and compare identical PDF rendering paths.
+        # PDFium puede re-muestrear al redondear: se comparan los bytes RGB guardados.
         reader = PdfReader(io.BytesIO(data))
         stored_images = [obj.get_object() for obj in reader.pages[0]['/Resources']['/XObject'].values()
                          if obj.get_object().get('/Subtype') == '/Image']

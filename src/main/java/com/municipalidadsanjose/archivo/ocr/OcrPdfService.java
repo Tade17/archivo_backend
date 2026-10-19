@@ -8,11 +8,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
 
-// A propósito NO tiene ningún método para editar el texto ni la posición de
-// un fragmento: el archivo histórico debe quedar exactamente como lo generó
-// el OCR, sin edición humana (requisito legal, ver OCR.md). Antes existía un
-// método corregir()/validarCorreccion() para eso; se retiró del todo en vez
-// de solo ocultarlo en la interfaz.
 @Service
 public class OcrPdfService {
     private final DocumentoDigitalRepository documentos;

@@ -9,8 +9,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class UsuarioMapper {
 
-    // El mapper nunca hashea la contraseña: eso es responsabilidad del Service
-    // (que tiene el PasswordEncoder). Aquí solo recibimos el hash ya calculado.
     public Usuario toEntity(UsuarioRequestDTO dto, Rol rol, String passwordHash) {
         Usuario usuario = new Usuario();
         usuario.setNombre(dto.nombre());

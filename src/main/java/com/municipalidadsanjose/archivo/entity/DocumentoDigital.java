@@ -96,7 +96,6 @@ public class DocumentoDigital {
     private long ocrVersion;
 
 
-    // Private durable transport/lease fields never belong in response DTOs.
     @com.fasterxml.jackson.annotation.JsonIgnore
     @Column(name = "ocr_job_id", length = 32)
     private String ocrJobId;
@@ -134,10 +133,7 @@ public class DocumentoDigital {
     @Column(name = "ocr_fase", length = 30)
     private String ocrFase;
 
-    // ocr_tsv NO se mapea: es una columna TSVECTOR que Postgres recalcula solo
-    // (trigger trg_documento_ocr_tsv) a partir de ocr_texto. La app nunca la
-    // lee ni la escribe directamente; la búsqueda full-text se hace con un
-    // query nativo (to_tsquery) contra esa columna desde el repository.
+    // ocr_tsv no se mapea: lo mantiene un trigger de Postgres a partir de ocr_texto.
 
     @UpdateTimestamp
     @Column(name = "fecha_actualizacion", nullable = false)

@@ -109,7 +109,6 @@ class ArtifactStore:
                         self._path(path.stem, '.pdf').unlink(missing_ok=True)
                         path.unlink(missing_ok=True)
                 elif path.suffix in {'.part', '.pdf'} and not self.active.get(path.stem):
-                    # Crash leftovers stay bounded and become reclaimable after the same TTL.
                     if not (self.root / (path.stem + '.json')).exists() and now - path.stat().st_mtime >= self.ttl:
                         path.unlink(missing_ok=True)
 
@@ -120,7 +119,6 @@ class ArtifactStore:
             self.sweep()
             files = [path for path in self.root.iterdir() if path.is_file() and not path.is_symlink()
                      and (path.suffix == '.pdf' or path.suffix == '.part' and not path.name.endswith('.json.part'))]
-            # Interrupted writes consume admission quota too, not just completed PDFs.
             reserved_ids = {path.name[:32] for path in self.root.iterdir()
                             if ID_PATTERN.fullmatch(path.name[:32])}
             external_bytes, external_count = self.external_usage()

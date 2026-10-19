@@ -180,7 +180,7 @@ def overlay_pdf(original: bytes, layout: object, dpi: int = 220,
                 or width <= 0 or height <= 0 or rotation not in {0, 90, 180, 270}):
             raise ValueError('La geometría de la página PDF no es válida')
         display_width, display_height = (height, width) if rotation in {90, 270} else (width, height)
-        # Inverse of displayed crop/clockwise rotation. Do not normalize source rotation.
+        # Inversa del recorte y la rotación mostrados; no normalizar la rotación de origen.
         matrices = {0: (1, 0, 0, 1, left, bottom),
                     90: (0, 1, -1, 0, right, bottom),
                     180: (-1, 0, 0, -1, right, top),

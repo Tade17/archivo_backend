@@ -15,13 +15,6 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
 
-/**
- * Ubicación física (Sección -> Nivel -> Área, tablas estante/nivel/caja) y los
- * contenedores (archivadores/folders) guardados en cada Área. Las lecturas van
- * por SQL para devolver la ruta completa de una vez; las escrituras pasan por el
- * servicio auditado. El alta/edición de Secciones, Niveles y Áreas es solo del
- * administrador y vive en EstanteController/NivelController/CajaController.
- */
 @RestController
 @RequestMapping("/api/workspace")
 public class ContenedorController {
@@ -94,7 +87,6 @@ public class ContenedorController {
         var values = new ArrayList<>(args);
         values.add(size);
         values.add(page * size);
-        // Los pendientes primero: son los que alguien tiene que retomar.
         var contenido = db.queryForList("SELECT " + COLUMNS + " " + where
                 + " ORDER BY (k.estado_digitalizacion = 'COMPLETADO'), k.fecha_actualizacion DESC, k.contenedor_id"
                 + " LIMIT ? OFFSET ?", values.toArray());

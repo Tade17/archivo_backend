@@ -13,7 +13,7 @@ public class OcrAsyncConfig {
     @Bean
     public ThreadPoolTaskScheduler taskScheduler() {
         var scheduler = new ThreadPoolTaskScheduler();
-        // One continuous drain and one independent heartbeat, never an in-memory document queue.
+        // Un hilo drena la cola OCR y otro renueva el lease.
         scheduler.setPoolSize(2);
         scheduler.setThreadNamePrefix("ocr-schedule-");
         scheduler.setWaitForTasksToCompleteOnShutdown(true);

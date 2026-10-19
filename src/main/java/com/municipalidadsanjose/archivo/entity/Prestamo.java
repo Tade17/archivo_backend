@@ -13,10 +13,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-/**
- * Préstamo físico a una entidad externa. Apunta a un expediente o a un
- * contenedor completo (uno de los dos, lo exige un CHECK en la base).
- */
 @Entity
 @Table(name = "prestamo")
 @Getter

@@ -79,7 +79,7 @@ public class OcrWorker {
             }
             EstadoOcr state = text.isBlank() || confidence.compareTo(umbralRevision) < 0
                     ? EstadoOcr.REQUIERE_REVISION : EstadoOcr.COMPLETADO;
-            // Repository transaction commits before this call returns: publication is the fence.
+            // publicarJob confirma su transacción antes de retornar.
             int updated = documentos.publicarJob(id, owner, job, text, confidence, result.pages(), state.name(), layout, newPath);
             if (updated == 0) {
                 cleanup(newPath); newPath = null;

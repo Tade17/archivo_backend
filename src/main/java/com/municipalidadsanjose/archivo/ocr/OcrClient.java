@@ -53,7 +53,7 @@ public class OcrClient {
             @Override
             protected void prepareConnection(java.net.HttpURLConnection connection, String method) throws IOException {
                 super.prepareConnection(connection, method);
-                // Never forward an artifact capability to a redirect target.
+                // No reenviar la credencial del artefacto en una redirección.
                 connection.setInstanceFollowRedirects(false);
             }
         };
@@ -94,7 +94,6 @@ public class OcrClient {
             if (result.pdfBase64() != null || result.layout() == null) {
                 throw failure("OCR_METADATA_INVALID", requestId, "El servicio OCR devolvió una respuesta inválida.", null);
             }
-            // Use the local request correlation, never an arbitrary upstream value.
             return new OcrResultado(result.text(), result.confidence(), result.pages(), result.lines(), result.model(),
                     result.layout(), null, result.artifact(), requestId);
         } catch (OcrFailure error) {
@@ -191,7 +190,7 @@ public class OcrClient {
                                     artifact.sha256(), maxArtifactBytes);
                         });
             } catch (RuntimeException error) {
-                // Retry only the retained binary artifact, never recognition/inference.
+                // Solo se reintenta la descarga del PDF, nunca el OCR.
                 if (attempt == 0 && hasIoCause(error)) continue;
                 if (error instanceof OcrFailure specific) throw specific;
                 throw failure("OCR_ARTIFACT_DOWNLOAD_FAILED", null, "No se pudo descargar íntegramente el PDF OCR. Reintenta el documento.", error);
@@ -369,7 +368,6 @@ public class OcrClient {
         } else {
             message = "El servicio OCR rechazó la solicitud (HTTP " + status + ").";
         }
-        // Keep upstream bodies and internal paths out of persisted user-facing errors.
         return new IllegalStateException(message, error);
     }
 

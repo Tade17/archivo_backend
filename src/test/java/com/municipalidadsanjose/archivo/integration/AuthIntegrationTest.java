@@ -10,8 +10,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Cubre el login por JWT y el fix del LazyInitializationException en
-// UsuarioDetailsService (usuario.getRol() se leía fuera de transacción).
 class AuthIntegrationTest extends IntegrationTestBase {
 
     @Test

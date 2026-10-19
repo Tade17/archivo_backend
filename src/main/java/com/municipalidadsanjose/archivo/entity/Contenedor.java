@@ -13,8 +13,6 @@ import org.hibernate.annotations.UpdateTimestamp;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
-// Archivador o folder físico guardado en un Área (tabla caja). Los documentos
-// (expedientes) se registran dentro de él uno por uno.
 @Entity
 @Table(name = "contenedor")
 @Getter
@@ -36,7 +34,6 @@ public class Contenedor {
     @Column(name = "tipo_contenedor", nullable = false, length = 20)
     private TipoContenedor tipo;
 
-    // Tal como está escrito en el lomo o la carátula (ej. "Archivador negro").
     @Column(nullable = false, length = 255)
     private String descripcion;
 

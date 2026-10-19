@@ -25,7 +25,7 @@ public class Estante {
     @JoinColumn(name = "archivo_central_id", nullable = false)
     private ArchivoCentral archivoCentral;
 
-    // Único solo dentro de su ArchivoCentral, no globalmente (ver uniqueConstraints arriba).
+    // Único solo dentro de su ArchivoCentral.
     @Column(nullable = false, length = 50)
     private String codigo;
 }

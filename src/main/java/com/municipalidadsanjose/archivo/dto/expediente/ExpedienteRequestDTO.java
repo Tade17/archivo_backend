@@ -44,7 +44,6 @@ public record ExpedienteRequestDTO(
         @NotNull(message = "El usuario que registra es obligatorio")
         UUID creadoPorId,
 
-        // Opcional: si no manda tags, el expediente queda sin etiquetar.
         Set<UUID> tagIds
 ) {
 }

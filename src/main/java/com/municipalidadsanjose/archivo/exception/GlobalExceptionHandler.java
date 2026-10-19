@@ -13,8 +13,6 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 import java.util.stream.Collectors;
 
-// Centraliza la traducción de excepciones de negocio a respuestas HTTP.
-// Sin esto, cada Controller tendría que hacer try/catch a mano.
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -42,7 +40,6 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(HttpStatus.CONFLICT.value(), ex.getMessage()));
     }
 
-    // Red de seguridad: cualquier violación de FK/constraint en vez de un 500 genérico.
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleIntegridadDatos(DataIntegrityViolationException ex) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
@@ -50,7 +47,6 @@ public class GlobalExceptionHandler {
                         "La operación viola una restricción de integridad de datos (probablemente un recurso referenciado por otro)"));
     }
 
-    // Se dispara cuando falla una validación de @Valid (@NotBlank, @Email, etc.)
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponse> handleValidacion(MethodArgumentNotValidException ex) {
         String mensaje = ex.getBindingResult().getFieldErrors().stream()
@@ -60,8 +56,6 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(HttpStatus.BAD_REQUEST.value(), mensaje));
     }
 
-    // JSON malformado o con un valor de enum/tipo inválido (ej. un TipoSolicitud
-    // que no existe): esto falla al deserializar, antes de llegar a @Valid.
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleJsonInvalido(HttpMessageNotReadableException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
@@ -69,22 +63,18 @@ public class GlobalExceptionHandler {
                         "El cuerpo de la solicitud es inválido o contiene un valor no permitido"));
     }
 
-    // Credenciales inválidas o usuario inactivo/bloqueado al hacer login.
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ErrorResponse> handleAutenticacion(AuthenticationException ex) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new ErrorResponse(HttpStatus.UNAUTHORIZED.value(), "Credenciales inválidas"));
     }
 
-    // Token válido pero sin el rol/autoridad requerido para el endpoint.
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ErrorResponse> handleAccesoDenegado(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ErrorResponse(HttpStatus.FORBIDDEN.value(), "Tu perfil no tiene acceso a esta función"));
     }
 
-    // Se dispara a nivel framework (spring.servlet.multipart.max-*), antes de
-    // que el archivo llegue a FileStorageService y su propia validación de tamaño.
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> handleArchivoDemasiadoGrande(MaxUploadSizeExceededException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)

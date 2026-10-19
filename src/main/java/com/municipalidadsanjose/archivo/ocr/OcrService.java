@@ -61,7 +61,6 @@ public class OcrService {
     @EventListener(ApplicationReadyEvent.class)
     public void recuperarPendientes() {
         if (!enabled) return;
-        // Claims recover only expired leases; never reset a live worker or enumerate a thread queue.
         documentos.programarPdfFaltantes();
     }
 

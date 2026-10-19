@@ -9,6 +9,6 @@ public class OcrEventHandler {
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void procesar(OcrSolicitadoEvent event) {
-        // The committed PENDIENTE row is the queue. Continuous claims need no Async submission.
+        // La fila PENDIENTE ya es la cola; OcrQueueScheduler la toma.
     }
 }

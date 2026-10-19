@@ -14,8 +14,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Flujo pedido por el Ing. Yomar: Sección/Nivel/Área -> contenedor (archivador o
-// folder) PENDIENTE -> documentos uno por uno -> el usuario lo marca COMPLETADO.
 class ContenedorIntegrationTest extends IntegrationTestBase {
 
     private String crearContenedor(String token, UUID cajaId) throws Exception {
@@ -145,8 +143,6 @@ class ContenedorIntegrationTest extends IntegrationTestBase {
                 .andExpect(status().isBadRequest());
     }
 
-    // Secciones/Niveles/Áreas solo reflejan lo que existe físicamente: las
-    // administra el administrador, no se crean desde el registro de documentos.
     @Test
     void gestor_noPuedeCrearUbicaciones_peroSiConsultarlas() throws Exception {
         Usuario gestor = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);

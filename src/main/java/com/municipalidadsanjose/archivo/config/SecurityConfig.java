@@ -46,8 +46,7 @@ public class SecurityConfig {
         this.objectMapper = objectMapper;
     }
 
-    // Sin esto, un request sin token (o con uno inválido) a un endpoint protegido
-    // termina en la página de error HTML default de Spring, no en nuestro ErrorResponse JSON.
+    // Responde 401/403 en JSON en vez de la página de error HTML de Spring.
     private void escribirError(HttpServletResponse response, HttpStatus status, String mensaje) throws java.io.IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
@@ -83,8 +82,6 @@ public class SecurityConfig {
         return config.getAuthenticationManager();
     }
 
-    // API sin sesión de navegador (Postman/Angular/lo que sea): CORS abierto a
-    // cualquier origen y sin cookies, así que CSRF no aplica.
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
@@ -107,9 +104,6 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/**").permitAll()
-                        // La documentación en sí es pública (solo describe la API); los
-                        // endpoints reales que Swagger UI invoque siguen exigiendo el
-                        // JWT como cualquier otro request, vía el botón "Authorize".
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/workspace/**").authenticated()
                         .requestMatchers("/api/auditoria/**").hasRole("ADMIN")

@@ -56,19 +56,14 @@ public class FileSystemStorageService implements FileStorageService {
                     "El archivo '%s' supera el tamaño máximo permitido (%d MB)"
                             .formatted(archivo.getOriginalFilename(), maxTamanoBytes / (1024 * 1024)));
         }
-        // Nota: el tipo MIME viene del header Content-Type que declara el cliente,
-        // no se inspecciona el contenido real del archivo (eso requeriría una
-        // librería de detección tipo Apache Tika). Suficiente para el objetivo
-        // actual de bloquear extensiones no deseadas por error o descuido.
+        // El tipo MIME es el declarado por el cliente; no se inspecciona el contenido.
         String tipoMime = archivo.getContentType();
         if (tipoMime == null || !tiposMimePermitidos.contains(tipoMime)) {
             throw new SolicitudInvalidaException(
                     "Tipo de archivo no permitido: " + tipoMime + ". Permitidos: " + tiposMimePermitidos);
         }
 
-        // La subcarpeta es siempre el UUID del expediente (nunca texto libre del
-        // cliente), y aun así se valida que el resultado no se escape del
-        // directorio base, como defensa en profundidad contra path traversal.
+        // Defensa contra path traversal.
         Path directorio = baseDir.resolve(subcarpeta).normalize();
         if (!directorio.startsWith(baseDir)) {
             throw new SolicitudInvalidaException("Subcarpeta de almacenamiento inválida");

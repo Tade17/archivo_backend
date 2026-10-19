@@ -27,8 +27,6 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<LoginResponseDTO> login(@Valid @RequestBody LoginRequestDTO dto) {
-        // Si las credenciales son inválidas o el usuario está inactivo, esto lanza
-        // BadCredentialsException/DisabledException, manejadas por GlobalExceptionHandler.
         var authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(dto.correo(), dto.password()));
 

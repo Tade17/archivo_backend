@@ -49,7 +49,6 @@ public class DocumentoDigitalController {
         this.imageBatchService = imageBatchService;
     }
 
-    // PDFs remain separate; images form one ordered PDF with preserved originals.
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @Transactional
     public ResponseEntity<List<DocumentoDigitalResponseDTO>> crear(
@@ -117,10 +116,7 @@ public class DocumentoDigitalController {
         return ResponseEntity.accepted().build();
     }
 
-    // No hay endpoint para editar el texto reconocido ni su posición en la
-    // página: el archivo histórico debe quedar tal como lo generó el OCR, sin
-    // edición humana (ver OCR.md). Solo se expone la lectura del PDF ya
-    // generado (descargarPdf) y el reintento automático (reintentarOcr).
+    // El texto OCR no se edita: el archivo histórico queda tal como lo generó el OCR (ver OCR.md).
 
     @GetMapping("/{id}/pdf")
     public ResponseEntity<Resource> descargarPdf(@PathVariable UUID id) {
@@ -133,8 +129,6 @@ public class DocumentoDigitalController {
                 .body(fileStorageService.cargarComoRecurso(ruta));
     }
 
-    // Deja constancia en auditoría (accion=DESCARGAR) de quién bajó el archivo,
-    // y devuelve el binario real (no la metadata).
     @PreAuthorize("isAuthenticated()")
     @GetMapping("/{id}/archivo")
     public ResponseEntity<Resource> descargarArchivo(@PathVariable UUID id) {

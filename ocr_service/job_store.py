@@ -27,7 +27,7 @@ def safe_storage(function):
         except JobError:
             raise
         except (OSError, ValueError, KeyError, TypeError) as error:
-            # Never leak local paths, OCR payload fragments or chained I/O exceptions.
+            # No exponer rutas locales ni fragmentos del OCR en los errores.
             raise JobError('OCR_JOB_STORAGE_FAILED') from None
     return invoke
 
@@ -119,7 +119,6 @@ class JobStore:
                     if name not in {'job.json', 'source', 'output.pdf', 'result.json'} and not re.fullmatch(r'[0-9]{3}\.json', name):
                         raise JobError('OCR_JOB_CORRUPT')
                 if not (folder / 'job.json').exists() and all(p.name in {'source', 'source.part', 'job.json.part'} for p in entries):
-                    # Unpublished submission or final empty acknowledgement directory.
                     for entry in entries:
                         entry.unlink()
                     folder.rmdir()
@@ -153,21 +152,19 @@ class JobStore:
                 if record['state'] == 'RUNNING':
                     record.update(state='QUEUED', phase='QUEUED')
                     self._save(record)
-                # Publication after a crash is recovered without running inference/export again.
+                # Tras una caída se recupera la publicación sin repetir el OCR.
                 if record['state'] == 'QUEUED' and self._path(folder.name, 'result.json').exists():
                     result = self._result(folder.name)
                     record.update(state='COMPLETED', phase='COMPLETED', completedPages=result['pages'])
                     self._save(record)
             except (OSError, ValueError, TypeError, KeyError, JobError) as error:
                 if folder.name not in self.records:
-                    # Unknown ownership cannot safely be reclaimed or resumed.
                     raise JobError('OCR_JOB_CORRUPT') from error
                 record = self.records[folder.name]
                 record.update(state='ERROR', phase='ERROR', errorCode=error.code if isinstance(error, JobError) else 'OCR_JOB_CORRUPT')
                 self._save(record)
 
     def usage(self):
-        # Full reservations include partial output/checkpoint writes, not only committed bytes.
         reserved = 0
         for ident, record in self.records.items():
             actual = sum(p.lstat().st_size for p in (self.root / ident).iterdir())
@@ -329,7 +326,6 @@ class JobStore:
             record = self.records[ident]
             if record['state'] == 'CANCELLED':
                 raise JobError('OCR_JOB_CANCELLED')
-            # Checkpoints and result coexist; reserve their combined actual bytes.
             checkpoint_size = sum(p.stat().st_size for p in (self.root / ident).glob('[0-9][0-9][0-9].json'))
             if checkpoint_size + len(body) > self.checkpoint_bytes:
                 raise JobError('OCR_JOB_LIMIT')
@@ -392,14 +388,13 @@ class JobStore:
                 raise JobError('OCR_JOB_NOT_READY')
             if ident in self.processing or self.active.get(ident):
                 raise JobError('OCR_JOB_BUSY')
-            # Durable acknowledgement precedes deletion. A failed write retains the result.
+            # Primero se confirma en disco y luego se borra.
             updated = dict(record, state='ACKNOWLEDGED', phase='ACKNOWLEDGED', updatedAt=time.time())
             self._save(updated)
             self.records[ident] = updated
             try:
                 self.sweep()
             except JobError:
-                # Already acknowledged: keep its private tombstone/quota for cleanup retry.
                 pass
 
     @safe_storage
@@ -430,7 +425,6 @@ class JobStore:
                 for path in files:
                     if path.is_symlink() or not path.is_file():
                         raise JobError('OCR_JOB_CORRUPT')
-                # Keep the bounded ownership manifest last for restart-safe partial cleanup.
                 for path in sorted(files, key=lambda p: p.name == 'job.json'):
                     path.unlink()
                 folder.rmdir()

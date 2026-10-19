@@ -64,8 +64,6 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         this.objectMapper = objectMapper;
     }
 
-    // Un contenedor COMPLETADO ya tiene todos sus documentos: para agregar uno
-    // faltante primero hay que reabrirlo (queda en auditoría quién lo hizo).
     private Contenedor contenedorAbierto(UUID contenedorId) {
         Contenedor contenedor = contenedorRepository.findById(contenedorId)
                 .orElseThrow(() -> new RecursoNoEncontradoException("Contenedor", contenedorId));
@@ -109,9 +107,7 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         Expediente expediente = expedienteMapper.toEntity(dto, areaDestino, tipo, estado, contenedor, creadoPor);
         expediente.getTags().addAll(resolverTags(dto.tagIds()));
 
-        // flush explícito: sin esto, fechaRegistro/fechaActualizacion (generadas por
-        // Hibernate con @CreationTimestamp/@UpdateTimestamp) quedan null en la respuesta,
-        // porque el INSERT recién se ejecuta al hacer commit, no al llamar a save().
+        // flush para que la respuesta incluya las fechas generadas por Hibernate.
         Expediente guardado = expedienteRepository.saveAndFlush(expediente);
         return expedienteMapper.toResponseDTO(guardado);
     }
@@ -154,13 +150,9 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         expediente.setNumeroFolios(dto.numeroFolios());
         expediente.setCreadoPor(creadoPor);
 
-        // Mutamos la colección existente en vez de reemplazar la referencia:
-        // es más seguro para Hibernate detectar altas/bajas en el @ManyToMany.
         expediente.getTags().clear();
         expediente.getTags().addAll(resolverTags(dto.tagIds()));
 
-        // idem que en crear(): sin flush, fechaActualizacion en la respuesta
-        // muestra el valor viejo en vez del que Hibernate acaba de generar.
         expedienteRepository.flush();
         return expedienteMapper.toResponseDTO(expediente);
     }
@@ -178,12 +170,10 @@ public class ExpedienteServiceImpl implements ExpedienteService {
         documentoDigitalRepository.deleteAll(documentos);
         expedienteRepository.delete(expediente);
         expedienteRepository.flush();
-        // Los archivos físicos se borran al final: si la transacción fallara
-        // antes, no queda una fila apuntando a un archivo que ya no existe.
+        // Los archivos se borran al final, si la transacción no falló antes.
         for (DocumentoDigital d : documentos) {
             fileStorageService.eliminar(d.getRutaAlmacenamiento());
             if (d.getRutaPdf() != null) fileStorageService.eliminar(d.getRutaPdf());
-            // Imágenes originales conservadas cuando se unieron en un solo PDF.
             com.municipalidadsanjose.archivo.service.DocumentoImageBatchService
                     .readManifest(d, objectMapper)
                     .forEach(original -> fileStorageService.eliminar(original.rutaAlmacenamiento()));

@@ -16,10 +16,6 @@ import static org.hamcrest.Matchers.matchesPattern;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-// Regresión del bug de flush: crear()/actualizar() devolvían fechaRegistro/
-// fechaActualizacion en null (o con el valor viejo) porque el INSERT/UPDATE
-// recién se ejecutaba al hacer commit, no al llamar a save(). Se corrigió con
-// saveAndFlush()/flush() explícito. También cubre la paginación de listarTodos().
 class ExpedienteIntegrationTest extends IntegrationTestBase {
 
     @Test
@@ -112,8 +108,6 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
     @Test
     void crear_devuelveTimestampsPobladosEnLaMismaRespuesta() throws Exception {
         crearExpedienteYObtenerRespuesta();
-        // Las aserciones de fecha ya corrieron dentro de crearExpedienteYObtenerRespuesta();
-        // si el bug de flush reapareciera, ese método fallaría antes de llegar acá.
     }
 
     @Test
@@ -136,10 +130,8 @@ class ExpedienteIntegrationTest extends IntegrationTestBase {
         UUID id = UUID.fromString(com.jayway.jsonpath.JsonPath.read(respuestaCrear, "$.id").toString());
         String fechaActualizacionOriginal = com.jayway.jsonpath.JsonPath.read(respuestaCrear, "$.fechaActualizacion");
 
-        // Cambia el asunto para forzar un UPDATE real.
         String bodyActualizar = expedienteRequestJson(area.getId(), tipo.getId(), estado.getId(), contenedor.getId(), usuario.getId())
                 .replace("\"asunto\": \"Asunto de prueba\"", "\"asunto\": \"Asunto editado\"");
-        // El código único debe mantenerse igual al original para no chocar con existsByCodigoUnico.
         String codigoOriginal = com.jayway.jsonpath.JsonPath.read(respuestaCrear, "$.codigoUnico");
         bodyActualizar = bodyActualizar.replaceFirst("\"codigoUnico\": \"EXP-[^\"]+\"", "\"codigoUnico\": \"" + codigoOriginal + "\"");
 
