@@ -1,6 +1,6 @@
 # Despliegue completo: base de datos + OCR + backend + frontend.
 #
-#   1. Clona archivo-backend y archivo-frontend UNO AL LADO DEL OTRO.
+#   1. Clona este repositorio (el frontend se descarga solo al construir).
 #   2. En archivo-backend: copia .env.example a .env y complétalo.
 #   3. docker compose -f docker-compose.prod.yml up -d --build
 #      (o pon COMPOSE_FILE=docker-compose.prod.yml en el .env y usa solo
@@ -74,7 +74,10 @@ services:
 
   frontend:
     build:
-      context: ../archivo-frontend
+      # Por defecto el frontend se descarga de GitHub durante el build: basta con
+      # clonar ESTE repositorio. Para construir un frontend local (sin subirlo),
+      # define FRONTEND_CONTEXT=../carpeta-del-frontend en el .env.
+      context: ${FRONTEND_CONTEXT:-https://github.com/Tade17/archivo_frontend.git#main}
     restart: unless-stopped
     depends_on:
       - backend
