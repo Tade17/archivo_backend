@@ -18,6 +18,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Method;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -82,8 +83,8 @@ public class AuditoriaAspect {
         UUID id = primerArgumentoUUID(joinPoint);
         if (id == null) return null;
         String sql = switch (entidad) {
-            case "Expediente" -> "SELECT codigo_unico || ' · ' || asunto FROM expediente WHERE expediente_id = ?";
-            case "DocumentoDigital" -> "SELECT d.nombre_archivo || ' (' || e.codigo_unico || ')' FROM documento_digital d"
+            case "Expediente" -> "SELECT codigo_unico || ' · ' || asunto AS nombre, asunto FROM expediente WHERE expediente_id = ?";
+            case "DocumentoDigital" -> "SELECT d.nombre_archivo || ' (' || e.codigo_unico || ')' AS nombre, e.asunto AS asunto FROM documento_digital d"
                     + " JOIN expediente e ON e.expediente_id = d.expediente_id WHERE d.documento_id = ?";
             case "Contenedor" -> "SELECT descripcion FROM contenedor WHERE contenedor_id = ?";
             case "AreaResponsable" -> "SELECT nombre FROM area_responsable WHERE area_id = ?";
@@ -97,12 +98,36 @@ public class AuditoriaAspect {
         };
         if (sql == null) return null;
         try {
-            List<String> nombres = db.queryForList(sql, String.class, id);
-            return nombres.isEmpty() || nombres.get(0) == null ? null : Map.of("nombre", nombres.get(0));
+            List<Map<String, Object>> filas = db.queryForList(sql, id);
+            if (filas.isEmpty() || filas.get(0).values().iterator().next() == null) return null;
+            // La primera columna es el nombre; si hay una columna "asunto" (expedientes y sus documentos) también se guarda.
+            String nombre = String.valueOf(filas.get(0).values().iterator().next());
+            String asunto = filas.get(0).get("asunto") == null ? null : String.valueOf(filas.get(0).get("asunto"));
+            conservarNombreEnElHistorial(entidad, id, nombre, asunto);
+            Map<String, Object> detalle = new HashMap<>();
+            detalle.put("nombre", nombre);
+            if (asunto != null) detalle.put("asunto", asunto);
+            return detalle;
         } catch (DataAccessException e) {
             // La auditoría no debe impedir la eliminación por no poder leer el nombre.
             log.warn("No se pudo leer el nombre de {} {} para la auditoría: {}", entidad, id, e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Lo que se elimina deja de existir y su historial ("Creó", "Consultó"…) perdería el nombre:
+     * se escribe ahora, en esas filas, mientras todavía se puede leer. Si es un expediente, también
+     * en las de sus documentos digitales, que se eliminan con él.
+     */
+    private void conservarNombreEnElHistorial(String entidad, UUID id, String nombre, String asunto) {
+        db.update("UPDATE auditoria SET detalle = jsonb_build_object('nombre', ?::text, 'asunto', ?::text)"
+                + " WHERE entidad_afectada = ? AND entidad_id = ? AND detalle IS NULL", nombre, asunto, entidad, id);
+        if ("Expediente".equals(entidad)) {
+            db.update("UPDATE auditoria a SET detalle = jsonb_build_object('nombre', d.nombre_archivo || ' (' || e.codigo_unico || ')', 'asunto', e.asunto)"
+                    + " FROM documento_digital d JOIN expediente e ON e.expediente_id = d.expediente_id"
+                    + " WHERE a.entidad_afectada = 'DocumentoDigital' AND a.entidad_id = d.documento_id"
+                    + " AND e.expediente_id = ? AND a.detalle IS NULL", id);
         }
     }
 

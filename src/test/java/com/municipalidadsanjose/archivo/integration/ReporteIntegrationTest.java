@@ -220,7 +220,7 @@ class ReporteIntegrationTest extends IntegrationTestBase {
     }
 
     private static final List<String> CODIGOS_ADMIN = List.of(
-            "actividad-usuario", "eliminaciones", "descargas-consultas", "usuarios-estado");
+            "actividad-usuario", "detalle-actividad", "eliminaciones", "descargas-consultas", "usuarios-estado");
 
     private String tokenAdmin(Usuario admin) throws Exception {
         return login(admin.getCorreo(), "Password123!");
@@ -244,7 +244,8 @@ class ReporteIntegrationTest extends IntegrationTestBase {
                     .andExpect(status().isForbidden());
             mockMvc.perform(get("/api/workspace/reportes/" + codigo).header("Authorization", "Bearer " + tokenAdmin))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.columnas", not(empty())));
+                    .andExpect(jsonPath("$.columnas", not(empty())))
+                    .andExpect(jsonPath("$.columnas[*].clave", not(hasItem("identificador")))); // código interno sin utilidad
         }
     }
 
@@ -279,6 +280,67 @@ class ReporteIntegrationTest extends IntegrationTestBase {
         // Una fecha pasada no incluye lo de hoy.
         String vacio = reporte(tokenAdmin, "eliminaciones", "texto", "Asunto de prueba", "hasta", LocalDate.now().minusDays(1).toString());
         org.junit.jupiter.api.Assertions.assertEquals(0, (int) JsonPath.read(vacio, "$.filas.length()"));
+    }
+
+    @Test
+    void detalleActividad_diceQueTocoCadaPersona() throws Exception {
+        Usuario admin = crearUsuario(obtenerRolAdmin(), "Password123!", true);
+        String tokenAdmin = tokenAdmin(admin);
+        Usuario gestor = crearUsuario(obtenerRol("GESTOR_DOCUMENTAL"), "Password123!", true);
+        String tokenGestor = login(gestor.getCorreo(), "Password123!");
+        Datos datos = crearExpediente(tokenGestor, gestor);
+
+        // El gestor registró un expediente: el detalle dice cuál (código y asunto), y el resumen lo cuenta.
+        String detalle = reporte(tokenAdmin, "detalle-actividad", "texto", gestor.getCorreo());
+        List<String> creados = JsonPath.read(detalle, "$.filas[?(@.accion == 'Creó' && @.tipo == 'Expediente')].asunto");
+        org.junit.jupiter.api.Assertions.assertEquals(1, creados.size());
+        org.junit.jupiter.api.Assertions.assertEquals("Asunto de prueba", creados.get(0));
+        List<String> codigos = JsonPath.read(detalle, "$.filas[?(@.accion == 'Creó' && @.tipo == 'Expediente')].que");
+        org.junit.jupiter.api.Assertions.assertTrue(codigos.get(0).startsWith("EXP-")); // el código; el asunto va en su columna
+        org.junit.jupiter.api.Assertions.assertEquals(datos.expedienteId(),
+                ((List<String>) JsonPath.read(detalle, "$.filas[?(@.accion == 'Creó')].identificador")).get(0));
+        String resumen = reporte(tokenAdmin, "actividad-usuario", "texto", gestor.getCorreo());
+        org.junit.jupiter.api.Assertions.assertEquals(1, (int) JsonPath.read(resumen, "$.filas[0].expedientes"));
+        org.junit.jupiter.api.Assertions.assertEquals(0, (int) JsonPath.read(resumen, "$.filas[0].documentos"));
+
+        // El administrador lo elimina: queda como «Eliminó» con el nombre, aunque el expediente ya no exista.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/expedientes/" + datos.expedienteId())
+                        .header("Authorization", "Bearer " + tokenAdmin))
+                .andExpect(status().isNoContent());
+        String eliminado = reporte(tokenAdmin, "detalle-actividad", "texto", admin.getCorreo(), "accion", "ELIMINAR");
+        org.junit.jupiter.api.Assertions.assertEquals(1, (int) JsonPath.read(eliminado, "$.filas.length()"));
+        org.junit.jupiter.api.Assertions.assertEquals("Eliminó", JsonPath.read(eliminado, "$.filas[0].accion"));
+        org.junit.jupiter.api.Assertions.assertTrue(((String) JsonPath.read(eliminado, "$.filas[0].que")).startsWith("EXP-"));
+        org.junit.jupiter.api.Assertions.assertEquals("Asunto de prueba", JsonPath.read(eliminado, "$.filas[0].asunto"));
+
+        // El filtro por usuario deja solo lo de esa persona (aunque otra tenga el mismo nombre).
+        String delGestor = reporte(tokenAdmin, "detalle-actividad", "usuarioId", gestor.getId().toString());
+        String delAdmin = reporte(tokenAdmin, "detalle-actividad", "usuarioId", admin.getId().toString());
+        org.junit.jupiter.api.Assertions.assertEquals(
+                (int) JsonPath.read(reporte(tokenAdmin, "detalle-actividad", "texto", gestor.getCorreo()), "$.filas.length()"),
+                (int) JsonPath.read(delGestor, "$.filas.length()"));
+        org.junit.jupiter.api.Assertions.assertTrue(((List<String>) JsonPath.read(delAdmin, "$.filas[*].accion")).contains("Eliminó"));
+        org.junit.jupiter.api.Assertions.assertFalse(((List<String>) JsonPath.read(delGestor, "$.filas[*].accion")).contains("Eliminó"));
+        // Usuario + acción combinados.
+        String creoElGestor = reporte(tokenAdmin, "detalle-actividad", "usuarioId", gestor.getId().toString(), "accion", "CREAR");
+        org.junit.jupiter.api.Assertions.assertTrue((int) JsonPath.read(creoElGestor, "$.filas.length()") >= 1);
+        mockMvc.perform(get("/api/workspace/reportes/detalle-actividad").param("usuarioId", "no-es-uuid")
+                .header("Authorization", "Bearer " + tokenAdmin)).andExpect(status().isBadRequest());
+
+        // Resumen: el id del usuario viaja en la fila para abrir su detalle.
+        org.junit.jupiter.api.Assertions.assertEquals(gestor.getId().toString(), JsonPath.read(resumen, "$.filas[0].usuario_id"));
+
+        // Filtrar por acción deja solo esa acción; buscar por lo tocado también funciona.
+        String soloCrear = reporte(tokenAdmin, "detalle-actividad", "texto", gestor.getCorreo(), "accion", "CREAR");
+        org.junit.jupiter.api.Assertions.assertTrue(((List<String>) JsonPath.read(soloCrear, "$.filas[*].accion")).stream().allMatch("Creó"::equals));
+        String porNombre = reporte(tokenAdmin, "detalle-actividad", "texto", "Asunto de prueba");
+        org.junit.jupiter.api.Assertions.assertTrue((int) JsonPath.read(porNombre, "$.filas.length()") >= 2);
+
+        mockMvc.perform(get("/api/workspace/reportes/detalle-actividad").param("accion", "VOLAR")
+                .header("Authorization", "Bearer " + tokenAdmin)).andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/workspace/reportes/detalle-actividad")
+                .header("Authorization", "Bearer " + tokenGestor)).andExpect(status().isForbidden());
     }
 
     @Test

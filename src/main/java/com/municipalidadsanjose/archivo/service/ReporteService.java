@@ -86,6 +86,9 @@ public class ReporteService {
             defAdmin("actividad-usuario", "Actividad por usuario",
                     "Qué hizo cada persona en el periodo: cuántas veces creó, modificó, consultó, descargó y eliminó.",
                     "desde", "hasta", "texto"),
+            defAdmin("detalle-actividad", "Detalle de actividad por usuario",
+                    "Cada acción de cada persona: qué expediente, documento, archivador o préstamo tocó y cuándo.",
+                    "desde", "hasta", "usuarioId", "accion", "texto"),
             defAdmin("eliminaciones", "Eliminaciones realizadas",
                     "Quién eliminó qué y cuándo (expedientes, documentos, archivadores y valores de catálogos).",
                     "desde", "hasta", "texto"),
@@ -103,7 +106,7 @@ public class ReporteService {
 
     public record Filtros(LocalDate desde, LocalDate hasta, UUID areaId, UUID tipoId, String fecha,
                           String agrupar, String estadoContenedor, String texto, boolean soloVacias,
-                          int dias, String estadoUsuario) {
+                          int dias, String estadoUsuario, String accion, UUID usuarioId) {
 
         public static Filtros de(Map<String, String> q) {
             return new Filtros(fechaDe(q, "desde"), fechaDe(q, "hasta"), uuidDe(q, "areaId"), uuidDe(q, "tipoId"),
@@ -112,7 +115,8 @@ public class ReporteService {
                     q.getOrDefault("estadoContenedor", "TODOS").toUpperCase(),
                     q.getOrDefault("texto", "").trim(),
                     "true".equalsIgnoreCase(q.get("soloVacias")),
-                    diasDe(q), q.getOrDefault("estadoUsuario", "TODOS").toUpperCase());
+                    diasDe(q), q.getOrDefault("estadoUsuario", "TODOS").toUpperCase(),
+                    q.getOrDefault("accion", "TODAS").toUpperCase(), uuidDe(q, "usuarioId"));
         }
 
         private static int diasDe(Map<String, String> q) {
@@ -177,6 +181,7 @@ public class ReporteService {
             case "prestamos-historial" -> prestamosHistorial(titulo, f);
             case "prestamos-mensual" -> prestamosMensual(titulo, f);
             case "actividad-usuario" -> actividadUsuario(titulo, f);
+            case "detalle-actividad" -> detalleActividad(titulo, f);
             case "eliminaciones" -> eliminaciones(titulo, f);
             case "descargas-consultas" -> descargasConsultas(titulo, f);
             case "usuarios-estado" -> usuariosEstado(titulo, f);
@@ -457,12 +462,14 @@ public class ReporteService {
         var where = new StringBuilder("true");
         rango(where, args, "a.fecha", f);
         textoUsuario(where, args, f);
-        String sql = "SELECT u.nombre AS usuario, u.correo AS correo, count(*) AS total,"
+        String sql = "SELECT u.nombre AS usuario, u.correo AS correo, u.usuario_id::text AS usuario_id, count(*) AS total,"
                 + " count(*) FILTER (WHERE a.accion = 'CREAR') AS creaciones,"
                 + " count(*) FILTER (WHERE a.accion = 'MODIFICAR') AS modificaciones,"
                 + " count(*) FILTER (WHERE a.accion = 'CONSULTAR') AS consultas,"
                 + " count(*) FILTER (WHERE a.accion = 'DESCARGAR') AS descargas,"
                 + " count(*) FILTER (WHERE a.accion = 'ELIMINAR') AS eliminaciones,"
+                + " count(*) FILTER (WHERE a.accion = 'CREAR' AND a.entidad_afectada = 'Expediente') AS expedientes,"
+                + " count(*) FILTER (WHERE a.accion = 'CREAR' AND a.entidad_afectada = 'DocumentoDigital') AS documentos,"
                 + " max(a.fecha) AS ultima_actividad"
                 + " FROM auditoria a JOIN usuario u ON u.usuario_id = a.usuario_id WHERE " + where
                 + " GROUP BY u.usuario_id, u.nombre, u.correo ORDER BY count(*) DESC, u.nombre";
@@ -470,7 +477,78 @@ public class ReporteService {
                 col("total", "Acciones", "numero"), col("creaciones", "Creó", "numero"),
                 col("modificaciones", "Modificó", "numero"), col("consultas", "Consultó", "numero"),
                 col("descargas", "Descargó", "numero"), col("eliminaciones", "Eliminó", "numero"),
+                col("expedientes", "Expedientes registrados", "numero"),
+                col("documentos", "Documentos digitalizados", "numero"),
                 col("ultima_actividad", "Última actividad", "fechahora")), sql, args);
+    }
+
+    private static final List<String> ACCIONES = List.of("CREAR", "MODIFICAR", "CONSULTAR", "DESCARGAR", "ELIMINAR");
+
+    /**
+     * Cada acción registrada en la auditoría, con el nombre de lo que se tocó. Para lo que ya no existe
+     * (eliminado) se usa el nombre guardado al eliminar; si es anterior a esa mejora, queda sin nombre.
+     */
+    private ReporteResultadoDTO detalleActividad(String titulo, Filtros f) {
+        if (!"TODAS".equals(f.accion()) && !ACCIONES.contains(f.accion())) {
+            throw new SolicitudInvalidaException("La acción debe ser TODAS, CREAR, MODIFICAR, CONSULTAR, DESCARGAR o ELIMINAR");
+        }
+        var args = new ArrayList<Object>();
+        var where = new StringBuilder("true");
+        rango(where, args, "fecha", f);
+        if (!"TODAS".equals(f.accion())) {
+            where.append(" AND accion_codigo = ?");
+            args.add(f.accion());
+        }
+        if (f.usuarioId() != null) {
+            where.append(" AND usuario_id = ?");
+            args.add(f.usuarioId());
+        }
+        if (!f.texto().isEmpty()) {
+            where.append(" AND unaccent(usuario || ' ' || correo || ' ' || coalesce(que, '') || ' ' || coalesce(asunto, '')) ILIKE unaccent(?)");
+            args.add("%" + f.texto() + "%");
+        }
+        String sql = "WITH ev AS (SELECT a.fecha AS fecha, u.usuario_id AS usuario_id, u.nombre AS usuario, u.correo AS correo, a.accion AS accion_codigo,"
+                + " CASE a.accion WHEN 'CREAR' THEN 'Creó' WHEN 'MODIFICAR' THEN 'Modificó' WHEN 'CONSULTAR' THEN 'Consultó'"
+                + "   WHEN 'DESCARGAR' THEN 'Descargó' WHEN 'ELIMINAR' THEN 'Eliminó' ELSE a.accion END AS accion,"
+                + " CASE a.entidad_afectada WHEN 'Expediente' THEN 'Expediente' WHEN 'DocumentoDigital' THEN 'Documento digital'"
+                + "   WHEN 'Contenedor' THEN 'Archivador o folder' WHEN 'Prestamo' THEN 'Préstamo' WHEN 'Usuario' THEN 'Usuario'"
+                + "   WHEN 'AreaResponsable' THEN 'Área de destino' WHEN 'TipoDocumental' THEN 'Tipo documental'"
+                + "   WHEN 'EstadoExpediente' THEN 'Estado de expediente' WHEN 'Estante' THEN 'Sección' WHEN 'Nivel' THEN 'Nivel'"
+                + "   WHEN 'Caja' THEN 'Área de ubicación' ELSE a.entidad_afectada END AS tipo,"
+                + " coalesce(CASE WHEN a.entidad_afectada = 'Expediente' THEN split_part(a.detalle ->> 'nombre', ' · ', 1)"
+                + "   ELSE a.detalle ->> 'nombre' END, CASE a.entidad_afectada"
+                + "   WHEN 'Expediente' THEN ex.codigo_unico"
+                + "   WHEN 'DocumentoDigital' THEN dd.nombre_archivo || ' (' || de.codigo_unico || ')'"
+                + "   WHEN 'Contenedor' THEN ct.descripcion"
+                + "   WHEN 'Prestamo' THEN pr.solicitante_nombre || ' · ' || coalesce(pe.codigo_unico, pc.descripcion)"
+                + "   WHEN 'Usuario' THEN us.nombre WHEN 'AreaResponsable' THEN ar.nombre WHEN 'TipoDocumental' THEN td.nombre"
+                + "   WHEN 'EstadoExpediente' THEN ee.nombre WHEN 'Estante' THEN 'Sección ' || st.codigo"
+                + "   WHEN 'Nivel' THEN 'Nivel ' || nv.codigo WHEN 'Caja' THEN 'Área ' || cj.codigo END) AS que,"
+                + " coalesce(CASE a.entidad_afectada WHEN 'Expediente' THEN ex.asunto WHEN 'DocumentoDigital' THEN de.asunto"
+                + "   WHEN 'Prestamo' THEN pe.asunto END, a.detalle ->> 'asunto',"
+                + "   CASE WHEN a.entidad_afectada = 'Expediente' AND a.detalle ->> 'nombre' LIKE '% · %'"
+                + "        THEN substr(a.detalle ->> 'nombre', position(' · ' IN a.detalle ->> 'nombre') + 3) END) AS asunto,"
+                + " a.entidad_id::text AS identificador"
+                + " FROM auditoria a JOIN usuario u ON u.usuario_id = a.usuario_id"
+                + " LEFT JOIN expediente ex ON a.entidad_afectada = 'Expediente' AND ex.expediente_id = a.entidad_id"
+                + " LEFT JOIN documento_digital dd ON a.entidad_afectada = 'DocumentoDigital' AND dd.documento_id = a.entidad_id"
+                + " LEFT JOIN expediente de ON de.expediente_id = dd.expediente_id"
+                + " LEFT JOIN contenedor ct ON a.entidad_afectada = 'Contenedor' AND ct.contenedor_id = a.entidad_id"
+                + " LEFT JOIN prestamo pr ON a.entidad_afectada = 'Prestamo' AND pr.prestamo_id = a.entidad_id"
+                + " LEFT JOIN expediente pe ON pe.expediente_id = pr.expediente_id"
+                + " LEFT JOIN contenedor pc ON pc.contenedor_id = pr.contenedor_id"
+                + " LEFT JOIN usuario us ON a.entidad_afectada = 'Usuario' AND us.usuario_id = a.entidad_id"
+                + " LEFT JOIN area_responsable ar ON a.entidad_afectada = 'AreaResponsable' AND ar.area_id = a.entidad_id"
+                + " LEFT JOIN tipo_documental td ON a.entidad_afectada = 'TipoDocumental' AND td.tipo_id = a.entidad_id"
+                + " LEFT JOIN estado_expediente ee ON a.entidad_afectada = 'EstadoExpediente' AND ee.estado_id = a.entidad_id"
+                + " LEFT JOIN estante st ON a.entidad_afectada = 'Estante' AND st.estante_id = a.entidad_id"
+                + " LEFT JOIN nivel nv ON a.entidad_afectada = 'Nivel' AND nv.nivel_id = a.entidad_id"
+                + " LEFT JOIN caja cj ON a.entidad_afectada = 'Caja' AND cj.caja_id = a.entidad_id)"
+                + " SELECT fecha, usuario, accion, tipo, que, asunto, identificador FROM ev WHERE " + where
+                + " ORDER BY fecha DESC, identificador";
+        return armar("detalle-actividad", titulo, List.of(col("fecha", "Fecha y hora", "fechahora"), col("usuario", "Usuario", "texto"),
+                col("accion", "Acción", "texto"), col("tipo", "Tipo", "texto"), col("que", "Qué tocó", "texto"),
+                col("asunto", "Asunto del documento", "texto")), sql, args);
     }
 
     private ReporteResultadoDTO eliminaciones(String titulo, Filtros f) {
@@ -491,8 +569,7 @@ public class ReporteService {
                 + " FROM auditoria a JOIN usuario u ON u.usuario_id = a.usuario_id WHERE " + where
                 + " ORDER BY a.fecha DESC, a.auditoria_id";
         return armar("eliminaciones", titulo, List.of(col("fecha", "Fecha y hora", "fechahora"), col("usuario", "Quién", "texto"),
-                col("tipo", "Tipo", "texto"), col("que", "Qué se eliminó", "texto"),
-                col("identificador", "Identificador", "texto")), sql, args);
+                col("tipo", "Tipo", "texto"), col("que", "Qué se eliminó", "texto")), sql, args);
     }
 
     private ReporteResultadoDTO descargasConsultas(String titulo, Filtros f) {
