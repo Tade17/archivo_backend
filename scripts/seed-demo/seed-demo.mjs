@@ -1,15 +1,16 @@
 // Carga los datos de prueba a través de la API real del sistema.
 // Uso (con backend y Postgres levantados):  node seed-demo.mjs
 // Es idempotente: si algo ya existe (área, tipo, usuario, ubicación, contenedor,
-// expediente) lo omite. Los documentos de la demo se reparten en archivadores
+// expediente, préstamos, actividad de ejemplo) lo omite.
+// Variables opcionales: API_URL, ADMIN_PASSWORD (si cambió la clave del admin), PG_CONTAINER. Los documentos de la demo se reparten en archivadores
 // físicos (Sección -> Nivel -> Área -> Archivador), uno por oficina de origen.
 import { execFileSync } from 'node:child_process';
 import { AREAS, EXPEDIENTES, PASSWORD_DEMO, TIPOS, USUARIOS, areaVigente, tipoVigente } from './data.mjs';
 import { scanPdf, textPdf } from './pdf.mjs';
 
 const API = process.env.API_URL ?? 'http://localhost:8080/api';
-const ADMIN = { correo: 'admin@sanjose.gob.pe', password: 'CambiarInmediatamente123!' };
-const CONTAINER = 'archivo-postgres';
+const ADMIN = { correo: 'admin@sanjose.gob.pe', password: process.env.ADMIN_PASSWORD ?? 'CambiarInmediatamente123!' };
+const CONTAINER = process.env.PG_CONTAINER ?? 'archivo-postgres';
 
 async function call(method, path, { token, json, form } = {}) {
   const headers = {};
@@ -26,6 +27,9 @@ const login = (correo, password) => call('POST', '/auth/login', { json: { correo
 
 const sql = (statement) =>
   execFileSync('docker', ['exec', CONTAINER, 'psql', '-U', 'postgres', '-d', 'archivo_sanjose', '-v', 'ON_ERROR_STOP=1', '-c', statement], { stdio: ['ignore', 'pipe', 'inherit'] });
+
+// Las fechas relativas ("hace 12 días") se calculan en hora de Lima, igual que la aplicación.
+const sqlLima = (statement) => sql(`SET TIME ZONE 'America/Lima'; ${statement}`);
 
 const admin = await login(ADMIN.correo, ADMIN.password);
 const adminToken = admin.token;
@@ -86,6 +90,12 @@ for (const u of USUARIOS) {
   if (existentes.has(u.correo)) continue;
   await call('POST', '/usuarios', { token: adminToken, json: { nombre: u.nombre, correo: u.correo, password: PASSWORD_DEMO, rolId: roles.get(u.rol), activo: true } });
   console.log('  usuario creado:', u.correo, `(${u.rol})`);
+}
+// Una cuenta suspendida de ejemplo (para el reporte de usuarios).
+const SUSPENDIDO = { nombre: 'Carlos Eduardo Vega Alama', correo: 'carlos.vega@sanjose.gob.pe', rol: 'GESTOR_DOCUMENTAL' };
+if (!existentes.has(SUSPENDIDO.correo)) {
+  await call('POST', '/usuarios', { token: adminToken, json: { nombre: SUSPENDIDO.nombre, correo: SUSPENDIDO.correo, password: PASSWORD_DEMO, rolId: roles.get(SUSPENDIDO.rol), activo: false } });
+  console.log('  usuario suspendido creado:', SUSPENDIDO.correo);
 }
 const sesiones = new Map();
 for (const u of USUARIOS) sesiones.set(u.clave, await login(u.correo, PASSWORD_DEMO));
@@ -149,6 +159,81 @@ for (const c of items(await call('GET', '/workspace/contenedores?texto=antes%20d
   if (c.totalDocumentos === 0) await call('DELETE', `/workspace/contenedores/${c.id}`, { token: adminToken });
 }
 
+
+// ── Préstamos de ejemplo (semáforo y reportes de préstamos) ─────────────────
+const rosa = sesiones.get('rosa');
+const totalPrestamos = (await call('GET', '/workspace/prestamos?estado=TODOS&size=1', { token: rosa.token })).totalElementos;
+if (totalPrestamos > 0) {
+  console.log(`
+Préstamos: ya hay ${totalPrestamos}, no se agregan.`);
+} else {
+  const idDe = async (n) => items(await call('GET', `/workspace/buscar?texto=${encodeURIComponent(EXPEDIENTES[n].numeroDocumento)}&size=5`, { token: rosa.token })).find((x) => x.numeroDocumento === EXPEDIENTES[n].numeroDocumento).id;
+  const prestar = (json) => call('POST', '/workspace/prestamos', { token: rosa.token, json });
+  // salioHace/venceEn/devueltoHace se ajustan por SQL: la API siempre registra "hoy" + los días pedidos.
+  const PRESTAMOS = [
+    { exp: 0, solicitante: 'Contraloría General de la República', dias: 7, salioHace: 12, venceEn: -4 },
+    { exp: 1, solicitante: 'Poder Judicial - Juzgado Civil de Sullana', dias: 5, salioHace: 3, venceEn: 2 },
+    { exp: 2, solicitante: 'Defensoría del Pueblo - Oficina de Piura', dias: 10 },
+    { exp: 3, solicitante: 'Contraloría General de la República', dias: 3, salioHace: 40, venceEn: -35, devueltoHace: 30 },
+    { exp: 4, solicitante: 'Fiscalía Provincial de Sullana', dias: 6, salioHace: 7, venceEn: -1 },
+  ];
+  let hechos = 0;
+  for (const p of PRESTAMOS) {
+    const creado = await prestar({ expedienteId: await idDe(p.exp), solicitante: p.solicitante, dias: p.dias, observaciones: 'Préstamo de demostración' });
+    if (p.devueltoHace) await call('POST', `/workspace/prestamos/${creado.id}/devolver`, { token: rosa.token });
+    if (!UUID.test(creado.id)) throw new Error('Dato inesperado en préstamo');
+    const sets = [];
+    if (p.salioHace) sets.push(`fecha_solicitud = now() - interval '${p.salioHace} days'`);
+    if (p.venceEn !== undefined) sets.push(`fecha_devolucion_prevista = current_date + (${p.venceEn})`);
+    if (p.devueltoHace) sets.push(`fecha_devolucion_real = now() - interval '${p.devueltoHace} days'`);
+    if (sets.length) sqlLima(`UPDATE prestamo SET ${sets.join(', ')} WHERE prestamo_id = '${creado.id}'`);
+    hechos++;
+  }
+  // Un archivador completo (el de una oficina cuyos documentos no están prestados).
+  try {
+    const usados = new Set(PRESTAMOS.map((p) => EXPEDIENTES[p.exp].area));
+    const libre = oficinas.find((o) => !usados.has(o) && !pendientes.has(contenedorDe.get(o)));
+    await prestar({ contenedorId: contenedorDe.get(libre), solicitante: 'Fiscalía Provincial de Sullana', dias: 15, observaciones: 'Archivador completo, demostración' });
+    hechos++;
+  } catch (e) {
+    console.log('  (no se pudo prestar un archivador de ejemplo:', e.message.slice(0, 80) + ')');
+  }
+  console.log(`
+Préstamos de ejemplo: ${hechos} (vencidos, por vencer, en plazo y devuelto).`);
+}
+
+// ── Actividad de ejemplo: consultas y descargas de los lectores ────────────
+const consultasLector = (await call('GET', '/workspace/reportes/descargas-consultas?texto=miriam', { token: adminToken })).filas.length;
+if (consultasLector === 0) {
+  const docs = items(await call('GET', '/documentos-digitales?size=6', { token: adminToken }));
+  const toca = (token, ruta) => fetch(API + ruta, { headers: { Authorization: `Bearer ${token}` } }).then((r) => r.arrayBuffer());
+  for (const [i, d] of docs.entries()) {
+    await toca(sesiones.get('miriam').token, `/workspace/documentos/${d.id}/vista`);
+    if (i % 2 === 0) await toca(sesiones.get('segundo').token, `/workspace/documentos/${d.id}/vista`);
+    if (i < 3) await toca(sesiones.get('miriam').token, `/documentos-digitales/${d.id}/archivo`);
+  }
+  console.log(`Actividad de ejemplo: ${docs.length} documentos consultados/descargados por los lectores.`);
+}
+
+// ── Dos eliminaciones de ejemplo (reporte "Eliminaciones realizadas") ──────
+const yaEliminados = (await call('GET', '/workspace/reportes/eliminaciones?texto=DEMO-ELIM', { token: adminToken })).filas.length;
+if (yaEliminados === 0) {
+  const destino = [...pendientes][0];
+  for (const n of [1, 2]) {
+    const exp = await call('POST', '/workspace/recepcion', {
+      token: rosa.token,
+      json: {
+        numeroDocumento: `DEMO-ELIM-0${n}`, remitente: 'Registro de demostración', areaDestinoId: areas.get(AREAS[0][0]), tipoId: tipos.get(TIPOS[0]),
+        fechaDocumento: new Date().toISOString().slice(0, 10), asunto: `DEMO-ELIM ${n} · Registro duplicado de demostración`, glosa: 'Se crea y se elimina para ilustrar el reporte.',
+        numeroFolios: 1, contenedorId: destino,
+      },
+    });
+    await call('DELETE', `/expedientes/${exp.id}`, { token: adminToken });
+  }
+  console.log('Eliminaciones de ejemplo: 2 (quedan en la auditoría con su nombre).');
+}
+
 console.log(`\nListo: ${nuevos} expedientes nuevos cargados (${EXPEDIENTES.length - nuevos} ya existían).`);
 console.log(`Usuarios de prueba (contraseña ${PASSWORD_DEMO}):`);
 for (const u of USUARIOS) console.log(`  ${u.correo}  ${u.rol}`);
+console.log(`  ${SUSPENDIDO.correo}  ${SUSPENDIDO.rol} (suspendida)`);

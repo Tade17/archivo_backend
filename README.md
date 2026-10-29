@@ -73,6 +73,10 @@ La migración [V2__seed_admin.sql](src/main/resources/db/migration/V2__seed_admi
 
 Antes de compartir la instalación, crea una cuenta administradora propia y desactiva la cuenta semilla según el procedimiento del equipo. Reiniciar o actualizar no restablece credenciales de una base ya modificada.
 
+### Datos de prueba (solo desarrollo)
+
+Con el backend en marcha, `node seed-demo.mjs` (en `scripts/seed-demo`) carga 30 expedientes, usuarios, préstamos y actividad de ejemplo; se puede repetir sin duplicar. Los pasos completos para un equipo nuevo, después de un `git pull` y para empezar de cero están en [scripts/seed-demo/README.md](scripts/seed-demo/README.md).
+
 Continúa con el [README del frontend](https://github.com/Tade17/archivo_frontend#readme). La API autentica mediante `POST /api/auth/login`; las solicitudes siguientes requieren `Authorization: Bearer <token>`.
 
 ## Configuración opcional
